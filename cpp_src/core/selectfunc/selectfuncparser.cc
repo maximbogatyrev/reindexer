@@ -10,22 +10,21 @@ namespace reindexer {
 SelectFuncStruct &SelectFuncParser::Parse(const std::string &query) {
 	tokenizer parser(query);
 
-	token tok = parser.next_token(tokenizer::flags::no_flags);
+	token tok = parser.next_token(false);
 
 	selectFuncStruct_.field = std::string(tok.text());
 
 	auto dotPos = tok.text().find('.');
 	if (dotPos == std::string_view::npos) {
-		tok = parser.next_token(tokenizer::flags::no_flags);
+		tok = parser.next_token(false);
 		if (tok.text() != "=") {
 			throw Error(errParams, "`=` is expected, but found `%s`", tok.text());
 		}
-		token ftok;
-		ParseFunction(parser, false, ftok);
+		ParseFunction(parser, false);
 	} else {
 		token ftok(TokenName);
 		ftok.text_.assign(tok.text_.begin() + dotPos + 1, tok.text_.end());
-		ParseFunction(parser, false, ftok);
+		ParseFunction(parser, false, std::move(ftok));
 	}
 
 	if (!selectFuncStruct_.isFunction) {
@@ -39,7 +38,7 @@ SelectFuncStruct &SelectFuncParser::Parse(const std::string &query) {
 void SelectFuncParser::parsePositionalAndNamedArgs(tokenizer &parser, const Args &args) {
 	using namespace std::string_view_literals;
 	token tok;
-	tok = parser.next_token(tokenizer::flags::no_flags);
+	tok = parser.next_token(false);
 	if (!(tok.type == TokenSymbol && tok.text() == "("sv)) {
 		throw Error(errParseDSL, "%s: An open parenthesis is required, but found `%s`", selectFuncStruct_.funcName, tok.text());
 	}
@@ -49,11 +48,11 @@ void SelectFuncParser::parsePositionalAndNamedArgs(tokenizer &parser, const Args
 	NamedArgState expectedToken = NamedArgState::Name;
 
 	while (!parser.end()) {
-		tok = parser.next_token(tokenizer::flags::no_flags);
+		tok = parser.next_token(false);
 		switch (tok.type) {
 			case TokenSymbol:
 				if (tok.text() == ")"sv) {
-					token nextTok = parser.next_token(tokenizer::flags::no_flags);
+					token nextTok = parser.next_token(false);
 					if (nextTok.text().length() > 0) {
 						throw Error(errParseDSL, "%s: Unexpected character `%s` after closing parenthesis.", selectFuncStruct_.funcName,
 									nextTok.text());
@@ -171,10 +170,10 @@ void SelectFuncParser::parsePositionalAndNamedArgs(tokenizer &parser, const Args
 	}
 }
 
-SelectFuncStruct &SelectFuncParser::ParseFunction(tokenizer &parser, bool partOfExpression, token &tok) {
+SelectFuncStruct &SelectFuncParser::ParseFunction(tokenizer &parser, bool partOfExpression, token tok) {
 	using namespace std::string_view_literals;
 	if (tok.text().empty()) {
-		tok = parser.next_token();
+		tok = parser.next_token(true);
 	}
 	if (tok.text() == "snippet") {
 		selectFuncStruct_.func = Snippet();
@@ -189,14 +188,14 @@ SelectFuncStruct &SelectFuncParser::ParseFunction(tokenizer &parser, bool partOf
 	}
 	selectFuncStruct_.funcName = std::string(tok.text());
 
-	tok = parser.next_token(tokenizer::flags::no_flags);
+	tok = parser.next_token(false);
 	if (tok.text() == "(") {
 		std::string arg;
 		while (!parser.end()) {
-			tok = parser.next_token(tokenizer::flags::no_flags);
+			tok = parser.next_token(false);
 			if (tok.text() == ")") {
 				if (!partOfExpression) {
-					token nextTok = parser.next_token(tokenizer::flags::no_flags);
+					token nextTok = parser.next_token(false);
 					if (nextTok.text().length() > 0) {
 						throw Error(errParseDSL, "%s: Unexpected character `%s` after closing parenthesis", selectFuncStruct_.funcName,
 									nextTok.text());
@@ -224,7 +223,7 @@ SelectFuncStruct &SelectFuncParser::ParseFunction(tokenizer &parser, bool partOf
 	return selectFuncStruct_;
 }
 
-bool SelectFuncParser::IsFunction(std::string_view val) noexcept {
+bool SelectFuncParser::IsFunction(std::string_view val) {
 	if (val.length() < 3) return false;
 
 	size_t i = 0;
@@ -258,7 +257,7 @@ bool SelectFuncParser::IsFunction(std::string_view val) noexcept {
 	return false;
 }
 
-bool SelectFuncParser::IsFunction(const VariantArray &val) noexcept {
+bool SelectFuncParser::IsFunction(const VariantArray &val) {
 	if (val.size() != 1) return false;
 	if (!val.front().Type().Is<KeyValueType::String>()) return false;
 	return IsFunction(static_cast<std::string_view>(val.front()));

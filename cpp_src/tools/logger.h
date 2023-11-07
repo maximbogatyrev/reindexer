@@ -15,7 +15,5 @@ void logPrintf(int level, const char* fmt, const Args&... args) {
 	logPrint(level, &str[0]);
 }
 
-enum class LoggerPolicy : int { NotInit, WithLocks, WithoutLocks };
-
-void logInstallWriter(LogWriter writer, LoggerPolicy mode);
+void logInstallWriter(LogWriter writer, bool multithreaded = true);
 }  // namespace reindexer

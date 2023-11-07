@@ -7,12 +7,7 @@
 int main(int argc, char* argv[]) {
 	reindexer::debug::backtrace_init();
 
-	try {
-		reindexer::CheckRequiredSSESupport();
-	} catch (Error& err) {
-		std::cerr << err.what();
-		return EXIT_FAILURE;
-	}
+	reindexer::CheckRequiredSSESupport();
 
 	reindexer_server::Server svc(reindexer_server::ServerMode::Standalone);
 	auto err = svc.InitFromCLI(argc, argv);

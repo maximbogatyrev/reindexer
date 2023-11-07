@@ -17,7 +17,6 @@ struct SelectCtx {
 	SelectFunctionsHolder *functions = nullptr;
 
 	JoinPreResult::Ptr preResult;
-	ExplainCalc::Duration preResultTimeTotal = ExplainCalc::Duration::zero();
 	SortingContext sortingContext;
 	uint8_t nsid = 0;
 	bool isForceAll = false;
@@ -32,8 +31,6 @@ struct SelectCtx {
 	const Query *parentQuery = nullptr;
 	ExplainCalc explain;
 	bool requiresCrashTracking = false;
-
-	RX_ALWAYS_INLINE bool isMergeQuerySubQuery() const noexcept { return isMergeQuery == IsMergeQuery::Yes && parentQuery; }
 };
 
 class ItemComparator;
@@ -80,7 +77,7 @@ private:
 	void addSelectResult(uint8_t proc, IdType rowId, IdType properRowId, SelectCtx &sctx, h_vector<Aggregator, 4> &aggregators,
 						 QueryResults &result, bool preselectForFt);
 
-	h_vector<Aggregator, 4> getAggregators(const std::vector<AggregateEntry>& aggEntrys, StrictMode strictMode) const;
+	h_vector<Aggregator, 4> getAggregators(const Query &) const;
 	void setLimitAndOffset(ItemRefVector &result, size_t offset, size_t limit);
 	void prepareSortingContext(SortingEntries &sortBy, SelectCtx &ctx, bool isFt, bool availableSelectBySortIndex);
 	static void prepareSortIndex(const NamespaceImpl &, std::string_view column, int &index, bool &skipSortingEntry, StrictMode);
@@ -100,7 +97,6 @@ private:
 	void checkStrictModeAgg(StrictMode strictMode, const std::string &name, const std::string &nsName,
 							const TagsMatcher &tagsMatcher) const;
 
-	void writeAggregationResultMergeSubQuery(QueryResults &result, h_vector<Aggregator, 4> &aggregators, SelectCtx &ctx);
 	NamespaceImpl *ns_;
 	SelectFunction::Ptr fnc_;
 	FtCtx::Ptr ft_ctx_;

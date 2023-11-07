@@ -9,9 +9,11 @@
 
 namespace reindexer {
 
+JsonDecoder::JsonDecoder(TagsMatcher &tagsMatcher) : tagsMatcher_(tagsMatcher), filter_(nullptr) {}
+JsonDecoder::JsonDecoder(TagsMatcher &tagsMatcher, const FieldsSet *filter) : tagsMatcher_(tagsMatcher), filter_(filter) {}
+
 Error JsonDecoder::Decode(Payload &pl, WrSerializer &wrser, const gason::JsonValue &v) {
 	try {
-		objectScalarIndexes_.reset();
 		tagsPath_.clear();
 		CJsonBuilder builder(wrser, ObjType::TypePlain, &tagsMatcher_);
 		decodeJson(&pl, builder, v, 0, true);
@@ -43,7 +45,7 @@ void JsonDecoder::decodeJsonObject(Payload &pl, CJsonBuilder &builder, const gas
 			const auto &f = pl.Type().Field(field);
 			switch (elem.value.getTag()) {
 				case gason::JSON_ARRAY: {
-					if rx_unlikely (!f.IsArray()) {
+					if (!f.IsArray()) {
 						throw Error(errLogic, "Error parsing json field '%s' - got array, expected scalar %s", f.Name(), f.Type().Name());
 					}
 					int count = 0;
@@ -58,8 +60,10 @@ void JsonDecoder::decodeJsonObject(Payload &pl, CJsonBuilder &builder, const gas
 					builder.ArrayRef(tagName, field, count);
 				} break;
 				case gason::JSON_NULL:
-					validateNonArrayFieldRestrictions(objectScalarIndexes_, pl, f, field, isInArray(), "json");
-					objectScalarIndexes_.set(field);
+					if (isInArray() && !f.IsArray()) {
+						throw Error(errLogic, "Error parsing json field '%s' - got value in the nested array, but expected scalar %s",
+									f.Name(), f.Type().Name());
+					}
 					builder.Null(tagName);
 					break;
 				case gason::JSON_NUMBER:
@@ -68,15 +72,15 @@ void JsonDecoder::decodeJsonObject(Payload &pl, CJsonBuilder &builder, const gas
 				case gason::JSON_STRING:
 				case gason::JSON_TRUE:
 				case gason::JSON_FALSE: {
-					validateNonArrayFieldRestrictions(objectScalarIndexes_, pl, f, field, isInArray(), "json");
-					objectScalarIndexes_.set(field);
+					if (isInArray() && !f.IsArray()) {
+						throw Error(errLogic, "Error parsing json field '%s' - got value in the nested array, but expected scalar %s",
+									f.Name(), f.Type().Name());
+					}
 					Variant v = jsonValue2Variant(elem.value, f.Type(), f.Name());
+					pl.Set(field, v, true);
 					builder.Ref(tagName, v, field);
-					pl.Set(field, std::move(v), true);
 				} break;
 			}
-		} else {
-			// objectScalarIndexes_.set(field); - do not change objectScalarIndexes_ value for the filtered out fields
 		}
 		tagsPath_.pop_back();
 	}
@@ -137,7 +141,7 @@ void JsonDecoder::decodeJson(Payload *pl, CJsonBuilder &builder, const gason::Js
 
 class TagsPathGuard {
 public:
-	TagsPathGuard(TagsPath &tagsPath, int tagName) noexcept : tagsPath_(tagsPath) { tagsPath_.emplace_back(tagName); }
+	TagsPathGuard(TagsPath &tagsPath, int tagName) : tagsPath_(tagsPath) { tagsPath_.emplace_back(tagName); }
 	~TagsPathGuard() { tagsPath_.pop_back(); }
 
 public:
@@ -154,7 +158,6 @@ void JsonDecoder::decodeJsonObject(const gason::JsonValue &root, CJsonBuilder &b
 
 void JsonDecoder::Decode(std::string_view json, CJsonBuilder &builder, const TagsPath &fieldPath) {
 	try {
-		objectScalarIndexes_.reset();
 		tagsPath_ = fieldPath;
 		gason::JsonParser jsonParser;
 		gason::JsonNode root = jsonParser.Parse(json);

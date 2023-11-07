@@ -67,7 +67,6 @@ type TestItem struct {
 	Tmp           string          `reindex:"tmp,-"`
 	Nested        StrictTestNest  `reindex:"-" json:"nested"`
 	Uuid          string          `reindex:"uuid,hash,uuid" json:"uuid"`
-	UuidStore     string          `reindex:"uuid_store,-,uuid" json:"uuid_store"`
 	UuidArray     []string        `reindex:"uuid_array,hash,uuid" json:"uuid_array"`
 	_             struct{}        `reindex:"id+tmp,,composite,pk"`
 	_             struct{}        `reindex:"age+genre,,composite"`
@@ -102,8 +101,7 @@ type TestItemIDOnly struct {
 	EndTime       int             `json:"end_time"`
 	StartTime     int             `json:"start_time"`
 	Tmp           string          `reindex:"tmp,-"`
-	Uuid          string          `reindex:"uuid,hash,uuid" json:"uuid"`
-	UuidStore     string          `reindex:"uuid_store,-,uuid" json:"uuid_store"`
+	Uuid          string          `reindex:"uuid,,uuid" json:"uuid"`
 	UuidArray     []string        `reindex:"uuid_array,hash,uuid" json:"uuid_array"`
 	_             struct{}        `reindex:"id+tmp,,composite,pk"`
 }
@@ -135,7 +133,6 @@ type TestItemWithSparse struct {
 	StartTime     int             `reindex:"start_time,tree"`
 	Tmp           string          `reindex:"tmp,-"`
 	Uuid          string          `reindex:"uuid,hash,uuid" json:"uuid"`
-	UuidStore     string          `reindex:"uuid_store,-,uuid" json:"uuid_store"`
 	UuidArray     []string        `reindex:"uuid_array,hash,uuid" json:"uuid_array"`
 	_             struct{}        `reindex:"id+tmp,,composite,pk"`
 	_             struct{}        `reindex:"age+genre,,composite"`
@@ -290,7 +287,6 @@ func newTestItem(id int, pkgsCount int) interface{} {
 			Name: randString(),
 		},
 		Uuid:      randUuid(),
-		UuidStore: randUuid(),
 		UuidArray: randUuidArray(rand.Int() % 20),
 	}
 }
@@ -348,7 +344,6 @@ func newTestItemIDOnly(id int, pkgsCount int) interface{} {
 			Name: randString(),
 		},
 		Uuid:      randUuid(),
-		UuidStore: randUuid(),
 		UuidArray: randUuidArray(rand.Int() % 20),
 	}
 }
@@ -379,7 +374,6 @@ func newTestItemWithSparse(id int, pkgsCount int) interface{} {
 			Name: randString(),
 		},
 		Uuid:      randUuid(),
-		UuidStore: randUuid(),
 		UuidArray: randUuidArray(rand.Int() % 20),
 	}
 }
@@ -593,7 +587,7 @@ func TestSTDistanceWrappers(t *testing.T) {
 			require.NoError(t, err)
 			it2, err := DBD.Query(ns).DWithin(field1, searchPoint, distance).Sort(fmt.Sprintf("ST_Distance(%s, ST_GeomFromText('point(%f %f)'))", field1, sortPoint[0], sortPoint[1]), false).ExecToJson().FetchAll()
 			require.NoError(t, err)
-			require.Equal(t, string(it1), string(it2))
+			require.Equal(t, it1, it2)
 		}
 	})
 	t.Run("ST_Distance between fields", func(t *testing.T) {
@@ -604,7 +598,7 @@ func TestSTDistanceWrappers(t *testing.T) {
 			require.NoError(t, err)
 			it2, err := DBD.Query(ns).DWithin(field1, searchPoint, distance).Sort(fmt.Sprintf("ST_Distance(%s, %s)", field1, field2), true).ExecToJson().FetchAll()
 			require.NoError(t, err)
-			require.Equal(t, string(it1), string(it2))
+			require.Equal(t, it1, it2)
 		}
 	})
 }
@@ -1090,28 +1084,12 @@ func callQueriesSequence(t *testing.T, namespace string, distinct []string, sort
 		WhereUuid("uuid", reindexer.LT, randUuid()).
 		ExecAndVerify(t)
 
-	newTestQuery(DB, namespace).Distinct(distinct).Sort(sort, desc).Debug(reindexer.TRACE).
-		WhereUuid("uuid", reindexer.SET, randUuidArray(rand.Int()%10)...).
-		ExecAndVerify(t)
-
 	newTestQuery(DB, namespace).Distinct(distinct).Sort(sort, desc).ReqTotal().Debug(reindexer.TRACE).
-		Not().Where("uuid_store", reindexer.EQ, randUuid()).
-		ExecAndVerify(t)
-
-	newTestQuery(DB, namespace).Distinct(distinct).Sort(sort, desc).Debug(reindexer.TRACE).
-		WhereUuid("uuid_store", reindexer.LT, randUuid()).
-		ExecAndVerify(t)
-
-	newTestQuery(DB, namespace).Distinct(distinct).Sort(sort, desc).ReqTotal().Debug(reindexer.TRACE).
-		WhereUuid("uuid_store", reindexer.SET, randUuidArray(rand.Int()%10)...).
+		Not().Where("uuid_array", reindexer.SET, randUuidArray(rand.Int()%10)).
 		ExecAndVerify(t)
 
 	newTestQuery(DB, namespace).Distinct(distinct).Sort(sort, desc).ReqTotal().Debug(reindexer.TRACE).
 		WhereUuid("uuid_array", reindexer.SET, randUuidArray(rand.Int()%10)...).
-		ExecAndVerify(t)
-
-	newTestQuery(DB, namespace).Distinct(distinct).Sort(sort, desc).ReqTotal().Debug(reindexer.TRACE).
-		Not().Where("uuid_array", reindexer.SET, randUuidArray(rand.Int()%10)).
 		ExecAndVerify(t)
 
 	if !testComposite {

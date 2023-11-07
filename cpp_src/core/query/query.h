@@ -281,8 +281,9 @@ public:
 	Query &Set(std::string field, const std::vector<T> &l, bool hasExpressions = false) & {
 		VariantArray value;
 		value.reserve(l.size());
+		value.MarkArray();
 		for (auto it = l.begin(); it != l.end(); it++) value.emplace_back(*it);
-		return Set(std::move(field), std::move(value.MarkArray()), hasExpressions);
+		return Set(std::move(field), std::move(value), hasExpressions);
 	}
 	template <typename T>
 	Query &&Set(std::string field, const std::vector<T> &l, bool hasExpressions = false) && {
@@ -334,8 +335,9 @@ public:
 	Query &SetObject(std::string field, const std::vector<T> &l, bool hasExpressions = false) & {
 		VariantArray value;
 		value.reserve(l.size());
+		value.MarkArray();
 		for (auto it = l.begin(); it != l.end(); it++) value.emplace_back(Variant(*it));
-		return SetObject(std::move(field), std::move(value.MarkArray()), hasExpressions);
+		return SetObject(std::move(field), std::move(value), hasExpressions);
 	}
 	template <typename T>
 	Query &&SetObject(std::string field, const std::vector<T> &l, bool hasExpressions = false) && {

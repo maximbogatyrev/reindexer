@@ -1,6 +1,5 @@
 #pragma once
 #include "core/joincache.h"
-#include "core/namespace/namespaceimpl.h"
 #include "explaincalc.h"
 #include "selectiteratorcontainer.h"
 
@@ -70,9 +69,10 @@ class JoinedSelector {
 	friend QueryPreprocessor;
 
 public:
-	JoinedSelector(JoinType joinType, NamespaceImpl::Ptr leftNs, NamespaceImpl::Ptr rightNs, JoinCacheRes &&joinRes, Query &&itemQuery,
-				   QueryResults &result, const JoinedQuery &joinQuery, JoinPreResult::Ptr preResult, uint32_t joinedFieldIdx,
-				   SelectFunctionsHolder &selectFunctions, uint32_t joinedSelectorsCount, bool inTransaction, const RdxContext &rdxCtx)
+	JoinedSelector(JoinType joinType, std::shared_ptr<NamespaceImpl> leftNs, std::shared_ptr<NamespaceImpl> rightNs, JoinCacheRes &&joinRes,
+				   Query &&itemQuery, QueryResults &result, const JoinedQuery &joinQuery, JoinPreResult::Ptr preResult,
+				   uint32_t joinedFieldIdx, SelectFunctionsHolder &selectFunctions, uint32_t joinedSelectorsCount, bool inTransaction,
+				   const RdxContext &rdxCtx)
 		: joinType_(joinType),
 		  called_(0),
 		  matched_(0),
@@ -106,7 +106,7 @@ public:
 											 const RdxContext &);
 	static constexpr int MaxIterationsForPreResultStoreValuesOptimization() noexcept { return 200; }
 	JoinPreResult::CPtr PreResult() const noexcept { return preResult_; }
-	const NamespaceImpl::Ptr &RightNs() const noexcept { return rightNs_; }
+	const std::shared_ptr<NamespaceImpl> &RightNs() const noexcept { return rightNs_; }
 
 private:
 	template <bool byJsonPath>
@@ -118,8 +118,8 @@ private:
 
 	JoinType joinType_;
 	int called_, matched_;
-	NamespaceImpl::Ptr leftNs_;
-	NamespaceImpl::Ptr rightNs_;
+	std::shared_ptr<NamespaceImpl> leftNs_;
+	std::shared_ptr<NamespaceImpl> rightNs_;
 	JoinCacheRes joinRes_;
 	Query itemQuery_;
 	QueryResults &result_;

@@ -35,8 +35,6 @@ class ItemIterator;
 
 class QueryResults {
 public:
-	using NamespaceImplPtr = intrusive_ptr<NamespaceImpl>;
-
 	QueryResults(int flags = 0);
 	QueryResults(const ItemRefVector::const_iterator &b, const ItemRefVector::const_iterator &e);
 	QueryResults(std::initializer_list<ItemRef> l);
@@ -124,15 +122,10 @@ public:
 	ItemRefVector &Items() { return items_; }
 	const ItemRefVector &Items() const { return items_; }
 	int GetJoinedNsCtxIndex(int nsid) const;
-	// Add owning ns pointer
-	// noLock has always to be 'true' (i.e. this method can only be called unders Namespace's lock)
-	void AddNamespace(NamespaceImplPtr, bool noLock);
-	// Add non-owning ns pointer
-	// noLock has always to be 'true' (i.e. this method can only be called unders Namespace's lock)
-	void AddNamespace(NamespaceImpl *, bool noLock);
+	void AddNamespace(std::shared_ptr<NamespaceImpl>, const NsContext &);
 	void RemoveNamespace(const NamespaceImpl *ns);
 	bool IsNamespaceAdded(const NamespaceImpl *ns) const noexcept {
-		return std::find_if(nsData_.cbegin(), nsData_.cend(), [ns](const NsDataHolder &nsData) { return nsData.ns == ns; }) !=
+		return std::find_if(nsData_.cbegin(), nsData_.cend(), [ns](const NsDataHolder &nsData) { return nsData.ns.get() == ns; }) !=
 			   nsData_.cend();
 	}
 	void MarkAsWALQuery() noexcept { isWalQuery_ = true; }
@@ -150,20 +143,15 @@ public:
 	std::optional<RdxActivityContext> activityCtx_;
 	friend InternalRdxContext;
 	friend SelectFunctionsHolder;
-	class NsDataHolder {
-	public:
-		NsDataHolder(NamespaceImplPtr &&_ns, StringsHolderPtr &&strHldr) noexcept;
-		NsDataHolder(NamespaceImpl *_ns, StringsHolderPtr &&strHldr) noexcept;
+	struct NsDataHolder {
+		NsDataHolder(std::shared_ptr<NamespaceImpl> &&ns_, StringsHolderPtr &&strHldr) noexcept
+			: ns{std::move(ns_)}, strHolder{std::move(strHldr)} {}
 		NsDataHolder(const NsDataHolder &) = delete;
 		NsDataHolder(NsDataHolder &&) noexcept = default;
 		NsDataHolder &operator=(const NsDataHolder &) = delete;
 		NsDataHolder &operator=(NsDataHolder &&) = default;
 
-	private:
-		NamespaceImplPtr nsPtr_;
-
-	public:
-		NamespaceImpl *ns;
+		std::shared_ptr<NamespaceImpl> ns;
 		StringsHolderPtr strHolder;
 	};
 

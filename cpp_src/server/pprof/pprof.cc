@@ -12,7 +12,7 @@
 #include "tools/serializer.h"
 #include "tools/stringstools.h"
 
-static const std::string kProfileNamePrefix = "reindexer_server";
+const std::string kProfileNamePrefix = "reindexer_server";
 
 namespace reindexer_server {
 using namespace reindexer;

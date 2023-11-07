@@ -5,17 +5,20 @@
 
 namespace reindexer {
 
+FunctionExecutor::FunctionExecutor(NamespaceImpl& ns) noexcept : ns_(ns) {}
+
 Variant FunctionExecutor::Execute(SelectFuncStruct& funcData) {
 	if (funcData.funcName == "now") {
-		std::string_view mode = "sec";
+		std::string mode = "sec";
 		if (!funcData.funcArgs.empty() && !funcData.funcArgs.front().empty()) {
 			mode = funcData.funcArgs.front();
 		}
 		return Variant(getTimeNow(mode));
 	} else if (funcData.funcName == "serial") {
 		return Variant(ns_.GetSerial(funcData.field));
+	} else {
+		throw Error(errParams, "Unknown function %s", funcData.field);
 	}
-	throw Error(errParams, "Unknown function '%s'. Field: '%s'", funcData.funcName, funcData.field);
 }
 
 }  // namespace reindexer

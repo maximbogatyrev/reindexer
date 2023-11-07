@@ -1809,8 +1809,7 @@ private:
 
 	template <typename K>
 	void insert_on_rehash(K &&key_value) {
-		KeySelect ks;
-		const key_type &key = ks(key_value);
+		const key_type &key = KeySelect()(key_value);
 
 		const std::size_t hash = hash_key(key);
 		std::size_t ibucket = bucket_for_hash(hash);

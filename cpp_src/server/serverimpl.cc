@@ -29,9 +29,9 @@
 #endif
 #ifdef LINK_RESOURCES
 #include <cmrc/cmrc.hpp>
-static void init_resources() { CMRC_INIT(reindexer_server_resources); }
+void init_resources() { CMRC_INIT(reindexer_server_resources); }
 #else
-static void init_resources() {}
+void init_resources() {}
 #endif
 
 #if defined(WITH_GRPC)
@@ -47,7 +47,7 @@ namespace reindexer_server {
 using reindexer::fs::GetDirPath;
 using reindexer::logLevelFromString;
 
-ServerImpl::ServerImpl(ServerMode mode)
+ServerImpl::ServerImpl([[maybe_unused]] ServerMode mode)
 	:
 #ifdef REINDEX_WITH_GPERFTOOLS
 	  config_(alloc_ext::TCMallocIsAvailable()),
@@ -56,8 +56,12 @@ ServerImpl::ServerImpl(ServerMode mode)
 #endif
 	  coreLogLevel_(LogNone),
 	  storageLoaded_(false),
-	  running_(false),
-	  mode_(mode) {
+	  running_(false)
+#ifndef REINDEX_WITH_ASAN
+	  ,
+	  mode_(mode)
+#endif	// REINDEX_WITH_ASAN
+{
 	async_.set(loop_);
 }
 
@@ -512,9 +516,7 @@ void ServerImpl::initCoreLogger() {
 			}
 		}
 	};
-	if (coreLogLevel_ && logger.lock()) {
-		reindexer::logInstallWriter(callback, mode_ == ServerMode::Standalone ? LoggerPolicy::WithoutLocks : LoggerPolicy::WithLocks);
-	}
+	if (coreLogLevel_ && logger.lock()) reindexer::logInstallWriter(callback);
 }
 
 ServerImpl::~ServerImpl() {
@@ -523,9 +525,7 @@ ServerImpl::~ServerImpl() {
 		rxAllowNamespaceLeak = true;
 	}
 #endif
-	if (coreLogLevel_) {
-		logInstallWriter(nullptr, mode_ == ServerMode::Standalone ? LoggerPolicy::WithoutLocks : LoggerPolicy::WithLocks);
-	}
+	if (coreLogLevel_) reindexer::logInstallWriter(nullptr);
 	async_.reset();
 }
 

@@ -236,7 +236,8 @@ void Query::deserialize(Serializer &ser, bool &hasJoinConditions) {
 					hasExpressions = ser.GetVarUint();
 					val.emplace_back(ser.GetVariant().EnsureHold());
 				}
-				Set(std::move(field), std::move(val.MarkArray(isArray)), hasExpressions);
+				if (isArray) val.MarkArray();
+				Set(std::move(field), std::move(val), hasExpressions);
 				break;
 			}
 			case QueryUpdateField: {
@@ -249,7 +250,8 @@ void Query::deserialize(Serializer &ser, bool &hasJoinConditions) {
 					hasExpressions = ser.GetVarUint();
 					val.emplace_back(ser.GetVariant().EnsureHold());
 				}
-				Set(std::move(field), std::move(val.MarkArray(isArray)), hasExpressions);
+				if (isArray) val.MarkArray();
+				Set(std::move(field), std::move(val), hasExpressions);
 				break;
 			}
 			case QueryUpdateObject: {
@@ -257,7 +259,7 @@ void Query::deserialize(Serializer &ser, bool &hasJoinConditions) {
 				std::string field(ser.GetVString());
 				bool hasExpressions = false;
 				int numValues = ser.GetVarUint();
-				val.MarkArray(ser.GetVarUint() == 1);
+				if (ser.GetVarUint() == 1) val.MarkArray();
 				while (numValues--) {
 					hasExpressions = ser.GetVarUint();
 					val.emplace_back(ser.GetVariant().EnsureHold());

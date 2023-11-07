@@ -18,7 +18,7 @@ public:
 	ItemModifier(ItemModifier &&) = delete;
 	ItemModifier &operator=(ItemModifier &&) = delete;
 
-	void Modify(IdType itemId);
+	void Modify(IdType itemId, const NsContext &ctx);
 
 private:
 	struct FieldData {
@@ -61,9 +61,9 @@ private:
 		std::string_view cjson_;
 	};
 
-	void modifyField(IdType itemId, FieldData &field, Payload &pl, VariantArray &values);
-	void modifyCJSON(PayloadValue &pv, IdType itemId, FieldData &field, VariantArray &values);
-	void modifyIndexValues(IdType itemId, const FieldData &field, VariantArray &values, Payload &pl);
+	void modifyField(IdType itemId, FieldData &field, Payload &pl, VariantArray &values, const NsContext &);
+	void modifyCJSON(PayloadValue &pv, IdType itemId, FieldData &field, VariantArray &values, const NsContext &);
+	void modifyIndexValues(IdType itemId, const FieldData &field, VariantArray &values, Payload &pl, const NsContext &);
 
 	NamespaceImpl &ns_;
 	const std::vector<UpdateEntry> &updateEntries_;

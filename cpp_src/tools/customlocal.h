@@ -3,10 +3,11 @@
 
 namespace reindexer {
 
-void ToLower(std::wstring& data) noexcept;
+using std::wstring;
+
+void ToLower(wstring& data) noexcept;
 wchar_t ToLower(wchar_t ch) noexcept;
 
 bool IsAlpha(wchar_t ch) noexcept;
-inline bool IsDigit(wchar_t ch) noexcept { return ch >= '0' && ch <= '9'; }
-
+bool IsDigit(wchar_t ch) noexcept;
 }  // namespace reindexer

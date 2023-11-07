@@ -1,5 +1,5 @@
 #pragma once
-#include <cstddef>
+#include <stdlib.h>
 
 void allocdebug_show();
 void allocdebug_init();

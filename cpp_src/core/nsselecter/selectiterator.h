@@ -4,7 +4,6 @@
 
 namespace reindexer {
 
-enum class IteratorFieldKind { None, NonIndexed, Indexed };
 /// Allows to iterate over a result of selecting
 /// data for one certain key.
 class SelectIterator : public SelectKeyResult {
@@ -24,7 +23,7 @@ public:
 	};
 
 	SelectIterator() = default;
-	SelectIterator(SelectKeyResult res, bool distinct, std::string name, IteratorFieldKind fieldKind, bool forcedFirst = false);
+	SelectIterator(SelectKeyResult res, bool distinct, std::string name, bool forcedFirst = false);
 
 	/// Starts iteration process: prepares
 	/// object for further work.
@@ -136,7 +135,6 @@ public:
 
 	bool distinct = false;
 	std::string name;
-	IteratorFieldKind fieldKind;
 
 protected:
 	// Iterates to a next item of result

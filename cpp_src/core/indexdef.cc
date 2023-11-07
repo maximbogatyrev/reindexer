@@ -68,7 +68,6 @@ static const std::unordered_map<IndexType, IndexInfo, std::hash<int>, std::equal
 		{IndexFuzzyFT,			{"string"s, "fuzzytext"s,		condsText(),	CapFullText}},
 		{IndexRTree,			{"point"s, "rtree"s,			condsGeom(),	0}},
 		{IndexUuidHash,			{"uuid"s, "hash"s,				condsUsual(),	CapSortable}},
-		{IndexUuidStore,		{"uuid"s, "-"s,					condsUsual(),	CapSortable}},
 	};
 	// clang-format on
 	return data;
@@ -123,14 +122,13 @@ bool IndexDef::IsEqual(const IndexDef &other, bool skipConfig) const {
 }
 
 IndexType IndexDef::Type() const {
-	using namespace std::string_view_literals;
-	std::string_view iType = indexType_;
+	std::string iType = indexType_;
 	if (iType == "") {
-		if (fieldType_ == "double"sv) {
+		if (fieldType_ == "double") {
 			iType = "tree";
-		} else if (fieldType_ == "bool"sv) {
+		} else if (fieldType_ == "bool") {
 			iType = "-";
-		} else if (fieldType_ == "point"sv) {
+		} else if (fieldType_ == "point") {
 			iType = "rtree";
 		} else {
 			iType = "hash";
@@ -158,8 +156,7 @@ const std::vector<std::string> &IndexDef::Conditions() const {
 bool isSortable(IndexType type) { return availableIndexes().at(type).caps & CapSortable; }
 
 bool isStore(IndexType type) noexcept {
-	return type == IndexIntStore || type == IndexInt64Store || type == IndexStrStore || type == IndexDoubleStore || type == IndexBool ||
-		   type == IndexUuidStore;
+	return type == IndexIntStore || type == IndexInt64Store || type == IndexStrStore || type == IndexDoubleStore || type == IndexBool;
 }
 
 std::string IndexDef::getCollateMode() const { return availableCollates().at(opts_.GetCollateMode()); }

@@ -20,14 +20,10 @@ public:
 
 class CJsonDecoder {
 public:
-	CJsonDecoder(TagsMatcher &tagsMatcher) noexcept : tagsMatcher_(tagsMatcher), filter_(nullptr) {}
-	CJsonDecoder(TagsMatcher &tagsMatcher, const FieldsSet *filter, Recoder *recoder) noexcept
-		: tagsMatcher_(tagsMatcher), filter_(filter), recoder_(recoder) {}
+	CJsonDecoder(TagsMatcher &tagsMatcher);
+	CJsonDecoder(TagsMatcher &tagsMatcher, const FieldsSet *filter, Recoder *);
 
-	void Decode(Payload &pl, Serializer &rdSer, WrSerializer &wrSer) {
-		objectScalarIndexes_.reset();
-		decodeCJson(pl, rdSer, wrSer, true);
-	}
+	void Decode(Payload &pl, Serializer &rdSer, WrSerializer &wrSer) { decodeCJson(pl, rdSer, wrSer, true); }
 
 private:
 	bool decodeCJson(Payload &pl, Serializer &rdser, WrSerializer &wrser, bool match);
@@ -38,7 +34,6 @@ private:
 	TagsPath tagsPath_;
 	Recoder *recoder_{nullptr};
 	int32_t arrayLevel_ = 0;
-	ScalarIndexesSetT objectScalarIndexes_;
 };
 
 }  // namespace reindexer

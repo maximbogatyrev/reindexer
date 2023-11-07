@@ -1,5 +1,4 @@
 #include "core/query/sql/sqlencoder.h"
-
 #include "core/keyvalue/geometry.h"
 #include "core/nsselecter/sortexpression.h"
 #include "core/queryresults/aggregationresult.h"
@@ -7,6 +6,21 @@
 #include "tools/serializer.h"
 
 namespace reindexer {
+
+const char *SQLEncoder::JoinTypeName(JoinType type) {
+	switch (type) {
+		case JoinType::InnerJoin:
+			return "INNER JOIN";
+		case JoinType::OrInnerJoin:
+			return "OR INNER JOIN";
+		case JoinType::LeftJoin:
+			return "LEFT JOIN";
+		case JoinType::Merge:
+			return "MERGE";
+		default:
+			return "<unknown>";
+	}
+}
 
 static void indexToSql(const std::string &index, WrSerializer &ser) {
 	if (index.find('+') == std::string::npos) {
@@ -54,7 +68,7 @@ SQLEncoder::SQLEncoder(const Query &q) : query_(q) {}
 void SQLEncoder::DumpSingleJoinQuery(size_t idx, WrSerializer &ser, bool stripArgs) const {
 	assertrx(idx < query_.joinQueries_.size());
 	const auto &jq = query_.joinQueries_[idx];
-	ser << ' ' << jq.joinType;
+	ser << ' ' << JoinTypeName(jq.joinType);
 	if (jq.entries.Empty() && jq.count == QueryEntry::kDefaultLimit && jq.sortingEntries_.empty()) {
 		ser << ' ' << jq._namespace << " ON ";
 	} else {
@@ -87,7 +101,7 @@ void SQLEncoder::dumpJoined(WrSerializer &ser, bool stripArgs) const {
 
 void SQLEncoder::dumpMerged(WrSerializer &ser, bool stripArgs) const {
 	for (auto &me : query_.mergeQueries_) {
-		ser << ' ' << me.joinType << "( ";
+		ser << ' ' << JoinTypeName(me.joinType) << "( ";
 		me.GetSQL(ser, stripArgs);
 		ser << ')';
 	}

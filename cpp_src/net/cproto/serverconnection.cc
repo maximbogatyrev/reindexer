@@ -265,41 +265,48 @@ void ServerConnection::responceRPC(Context &ctx, const Error &status, const Args
 }
 
 void ServerConnection::CallRPC(const IRPCCall &call) {
-	std::lock_guard lck(updates_mtx_);
-	updates_.emplace_back(call);
-	updatesSize_ += call.data_->size();
-
+	std::unique_lock<std::mutex> lck(updates_mtx_);
 	if (updatesSize_ > maxUpdatesSize_) {
 		updates_.clear();
 		Args args;
 		IRPCCall curCall = call;
 		CmdCode cmd;
-		std::string_view nsName;
-		curCall.Get(&curCall, cmd, nsName, args);
+		curCall.Get(&curCall, cmd, args);
+		if (args.size() >= 3) {
+			std::string_view nsName(args[1]);
+			WrSerializer ser;
+			ser.PutVString(nsName);
+			intrusive_ptr<intrusive_atomic_rc_wrapper<chunk>> data;
+			data.reset(new intrusive_atomic_rc_wrapper<chunk>(ser.DetachChunk()));
+			IRPCCall callLost = {[](IRPCCall *callLost, CmdCode &cmd, Args &args) {
+									 Serializer ser(callLost->data_->data(), callLost->data_->size());
+									 auto nsName = ser.GetVString();
+									 cmd = kCmdUpdates;
+									 args = {Arg(std::string(nsName.data(), nsName.size()))};
+								 },
+								 data};
+			logPrintf(LogWarning, "Call updates lost clientAddr = %s updatesSize = %d", clientAddr_, updatesSize_);
 
-		WrSerializer ser;
-		ser.PutVString(nsName);
-		IRPCCall callLost = {[](IRPCCall *callLost, CmdCode &cmd, std::string_view &ns, Args &args) {
-								 Serializer s(callLost->data_->data(), callLost->data_->size());
-								 cmd = kCmdUpdates;
-								 args = {Arg(std::string(s.GetVString()))};
-								 ns = std::string_view(args[0]);
-							 },
-							 make_intrusive<intrusive_atomic_rc_wrapper<chunk>>(ser.DetachChunk())};
-		logPrintf(LogWarning, "Call updates lost clientAddr = %s updatesSize = %d", clientAddr_, updatesSize_);
+			updates_.emplace_back(callLost);
+		}
 
-		updatesSize_ = callLost.data_->size();
-		updates_.emplace_back(std::move(callLost));
+		// order is important
 		updateLostFlag_ = true;
+		updatesSize_ = 0;
 
 		if (ConnectionST::stats_) {
-			if (auto stat = ConnectionST::stats_->get_stat(); stat) {
-				stat->updates_lost.fetch_add(1, std::memory_order_relaxed);
-				stat->pended_updates.store(1, std::memory_order_relaxed);
+			auto stat = ConnectionST::stats_->get_stat();
+			if (stat) {
+				stat->updates_lost++;
 			}
 		}
-	} else if (ConnectionST::stats_) {
-		if (auto stat = ConnectionST::stats_->get_stat(); stat) {
+	}
+	updates_.emplace_back(call);
+	updatesSize_ += call.data_->size();
+
+	if (ConnectionST::stats_) {
+		auto stat = ConnectionST::stats_->get_stat();
+		if (stat) {
 			stat->pended_updates.store(updates_.size(), std::memory_order_relaxed);
 		}
 	}
@@ -311,15 +318,10 @@ void ServerConnection::sendUpdates() {
 	}
 
 	std::vector<IRPCCall> updates;
-	size_t updatesSizeCopy;
-	{
-		std::lock_guard lck(updates_mtx_);
-		updates.swap(updates_);
-		updatesSizeCopy = updatesSize_;
-		updatesSize_ = 0;
-		updateLostFlag_ = false;
-	}
-
+	updates_mtx_.lock();
+	updates.swap(updates_);
+	updateLostFlag_ = false;
+	updates_mtx_.unlock();
 	if (updates.empty()) {
 		return;
 	}
@@ -331,13 +333,13 @@ void ServerConnection::sendUpdates() {
 	CmdCode cmd;
 	WrSerializer ser(wrBuf_.get_chunk());
 	size_t cnt = 0;
-	size_t updatesSizeBuffered = 0;
 	for (cnt = 0; cnt < updates.size() && ser.Len() < kMaxUpdatesBufSize; ++cnt) {
 		if (updates[cnt].data_) {
-			updatesSizeBuffered += updates[cnt].data_->size();
+			if (!updateLostFlag_) {
+				updatesSize_ -= updates[cnt].data_->size();
+			}
 		}
-		[[maybe_unused]] std::string_view ns;
-		updates[cnt].Get(&updates[cnt], cmd, ns, args);
+		updates[cnt].Get(&updates[cnt], cmd, args);
 		packRPC(ser, ctx, Error(), args, enableSnappy_);
 	}
 
@@ -345,46 +347,20 @@ void ServerConnection::sendUpdates() {
 	try {
 		wrBuf_.write(ser.DetachChunk());
 	} catch (...) {
-		RPCCall callLost{kCmdUpdates, 0, {}, milliseconds(0)};
-		cproto::Context ctxLost{"", &callLost, this, {{}, {}}, false};
-		{
-			std::lock_guard lck(updates_mtx_);
-			updates_.clear();
-			updatesSize_ = 0;
-			updateLostFlag_ = false;
-
-			logPrintf(LogWarning, "Call updates lost clientAddr = %s (wrBuf error)", clientAddr_);
-			wrBuf_.clear();
-			ser.Reset();
-			packRPC(ser, ctxLost, Error(), {Arg(std::string(""))}, enableSnappy_);
-			len = ser.Len();
-			wrBuf_.write(ser.DetachChunk());
-			if (ConnectionST::stats_) {
-				ConnectionST::stats_->update_send_buf_size(wrBuf_.data_size());
-				ConnectionST::stats_->update_pended_updates(0);
-			}
-		}
-
-		if (dispatcher_.onResponse_) {
-			ctx.stat.sizeStat.respSizeBytes = len;
-			dispatcher_.onResponse_(ctxLost);
-		}
-
-		callback(io_, ev::WRITE);
 		return;
 	}
 
 	if (cnt != updates.size()) {
-		std::lock_guard lck(updates_mtx_);
+		std::unique_lock<std::mutex> lck(updates_mtx_);
 		if (!updateLostFlag_) {
 			updates_.insert(updates_.begin(), updates.begin() + cnt, updates.end());
-			updatesSize_ += updatesSizeCopy - updatesSizeBuffered;
 		}
 
 		if (ConnectionST::stats_) stats_->update_pended_updates(updates.size());
 	} else if (ConnectionST::stats_) {
-		if (auto stat = ConnectionST::stats_->get_stat(); stat) {
-			std::lock_guard lck(updates_mtx_);
+		auto stat = ConnectionST::stats_->get_stat();
+		if (stat) {
+			std::unique_lock<std::mutex> lck(updates_mtx_);
 			stat->pended_updates.store(updates_.size(), std::memory_order_relaxed);
 		}
 	}

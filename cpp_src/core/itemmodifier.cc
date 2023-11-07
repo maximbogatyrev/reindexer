@@ -114,7 +114,8 @@ ItemModifier::ItemModifier(const std::vector<UpdateEntry> &updateEntries, Namesp
 	}
 }
 
-void ItemModifier::Modify(IdType itemId) {
+void ItemModifier::Modify(IdType itemId, const NsContext &ctx) {
+	assertrx(ctx.noLock);
 	PayloadValue &pv = ns_.items_[itemId];
 	Payload pl(ns_.payloadType_, pv);
 	pv.Clone(pl.RealSize());
@@ -139,36 +140,34 @@ void ItemModifier::Modify(IdType itemId) {
 		}
 
 		if (field.details().Mode() == FieldModeSetJson || !field.isIndex()) {
-			modifyCJSON(pv, itemId, field, values);
+			modifyCJSON(pv, itemId, field, values, ctx);
 		} else {
-			modifyField(itemId, field, pl, values);
+			modifyField(itemId, field, pl, values, ctx);
 		}
 	}
 
 	ns_.markUpdated(false);
 }
 
-void ItemModifier::modifyCJSON(PayloadValue &pv, IdType id, FieldData &field, VariantArray &values) {
+void ItemModifier::modifyCJSON(PayloadValue &pv, IdType id, FieldData &field, VariantArray &values, const NsContext &ctx) {
 	PayloadValue &plData = ns_.items_[id];
-	Payload pl(*ns_.payloadType_.get(), plData);
+	Payload pl(ns_.payloadType_, plData);
 	VariantArray cjsonKref;
 	pl.Get(0, cjsonKref);
 	cjsonCache_.Reset();
-
-	const Variant &v = cjsonKref.front();
-	if (v.Type().Is<KeyValueType::String>()) {
-		cjsonCache_.Assign(std::string_view(p_string(v)));
+	if (cjsonKref.size() > 0) {
+		Variant v = cjsonKref.front();
+		if (v.Type().Is<KeyValueType::String>()) {
+			cjsonCache_.Assign(std::string_view(p_string(v)));
+		}
 	}
 
 	ItemImpl itemimpl(ns_.payloadType_, pv, ns_.tagsMatcher_);
 	itemimpl.ModifyField(field.tagspath(), values, field.details().Mode());
 
-	Item item = ns_.newItem();
+	Item item = ns_.NewItem(ctx);
 	Error err = item.FromCJSON(itemimpl.GetCJSON(true));
-	if (!err.ok()) {
-		pl.Set(0, cjsonKref);
-		throw err;
-	}
+	if (!err.ok()) throw err;
 	item.setID(id);
 	ItemImpl *impl = item.impl_;
 	ns_.setFieldsBasedOnPrecepts(impl);
@@ -177,7 +176,7 @@ void ItemModifier::modifyCJSON(PayloadValue &pv, IdType id, FieldData &field, Va
 	Payload plNew = impl->GetPayload();
 	plData.Clone(pl.RealSize());
 
-	auto strHolder = ns_.strHolder();
+	auto strHolder = ns_.StrHolder(ctx);
 	auto indexesCacheCleaner{ns_.GetIndexesCacheCleaner()};
 	h_vector<bool, 32> needUpdateCompIndexes(ns_.indexes_.compositeIndexesSize(), false);
 	for (int i = ns_.indexes_.firstCompositePos(); i < ns_.indexes_.totalSize(); ++i) {
@@ -269,7 +268,7 @@ void ItemModifier::modifyCJSON(PayloadValue &pv, IdType id, FieldData &field, Va
 	impl->RealValue() = pv;
 }
 
-void ItemModifier::modifyField(IdType itemId, FieldData &field, Payload &pl, VariantArray &values) {
+void ItemModifier::modifyField(IdType itemId, FieldData &field, Payload &pl, VariantArray &values, const NsContext &ctx) {
 	Index &index = *(ns_.indexes_[field.index()]);
 	if (field.isIndex() && !index.Opts().IsSparse() && field.details().Mode() == FieldModeDrop /*&&
 		!(field.arrayIndex() != IndexValueType::NotSet || field.tagspath().back().IsArrayNode())*/) {	 // TODO #1218 allow to drop array fields
@@ -285,7 +284,7 @@ void ItemModifier::modifyField(IdType itemId, FieldData &field, Payload &pl, Var
 		for (const Variant &key : values) key.EnsureUTF8();
 	}
 
-	auto strHolder = ns_.strHolder();
+	auto strHolder = ns_.StrHolder(ctx);
 	auto indexesCacheCleaner{ns_.GetIndexesCacheCleaner()};
 	h_vector<bool, 32> needUpdateCompIndexes(ns_.indexes_.compositeIndexesSize(), false);
 	const auto firstCompositePos = ns_.indexes_.firstCompositePos();
@@ -327,7 +326,7 @@ void ItemModifier::modifyField(IdType itemId, FieldData &field, Payload &pl, Var
 
 	try {
 		if (field.isIndex()) {
-			modifyIndexValues(itemId, field, values, pl);
+			modifyIndexValues(itemId, field, values, pl, ctx);
 		}
 
 		if (index.Opts().IsSparse() || index.Opts().IsArray() || index.KeyType().Is<KeyValueType::Uuid>() || !field.isIndex()) {
@@ -361,12 +360,12 @@ void ItemModifier::modifyField(IdType itemId, FieldData &field, Payload &pl, Var
 	insertItemIntoCompositeIndexes();
 }
 
-void ItemModifier::modifyIndexValues(IdType itemId, const FieldData &field, VariantArray &values, Payload &pl) {
+void ItemModifier::modifyIndexValues(IdType itemId, const FieldData &field, VariantArray &values, Payload &pl, const NsContext &ctx) {
 	Index &index = *(ns_.indexes_[field.index()]);
 	if (values.IsNullValue() && !index.Opts().IsArray()) {
 		throw Error(errParams, "Non-array index fields cannot be set to null!");
 	}
-	auto strHolder = ns_.strHolder();
+	auto strHolder = ns_.StrHolder(ctx);
 	auto indexesCacheCleaner{ns_.GetIndexesCacheCleaner()};
 	bool updateArrayPart = field.arrayIndex() >= 0;
 	bool isForAllItems = false;

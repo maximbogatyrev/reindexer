@@ -2,10 +2,9 @@
 
 #include <thread>
 #include <type_traits>
-#include "bgnamespacedeleter.h"
-#include "core/querystat.h"
 #include "core/txstats.h"
 #include "estl/shared_mutex.h"
+#include "namespaceimpl.h"
 
 namespace reindexer {
 
@@ -13,10 +12,9 @@ namespace reindexer {
 
 class Namespace {
 public:
-	using Ptr = shared_ptr<Namespace>;
-
-	Namespace(const std::string &name, UpdatesObservers &observers, BackgroundNamespaceDeleter &bgDeleter)
-		: ns_(make_intrusive<NamespaceImpl>(name, observers)), bgDeleter_(bgDeleter) {}
+	Namespace(const std::string &name, UpdatesObservers &observers) : ns_(std::make_shared<NamespaceImpl>(name, observers)) {}
+	Namespace(NamespaceImpl::Ptr ns) : ns_(std::move(ns)) {}
+	typedef shared_ptr<Namespace> Ptr;
 
 	void CommitTransaction(Transaction &tx, QueryResults &result, const RdxContext &ctx);
 	std::string GetName(const RdxContext &ctx) const { return handleInvalidation(NamespaceImpl::GetName)(ctx); }
@@ -36,33 +34,25 @@ public:
 	void SetSchema(std::string_view schema, const RdxContext &ctx) { handleInvalidation(NamespaceImpl::SetSchema)(schema, ctx); }
 	std::string GetSchema(int format, const RdxContext &ctx) { return handleInvalidation(NamespaceImpl::GetSchema)(format, ctx); }
 	std::shared_ptr<const Schema> GetSchemaPtr(const RdxContext &ctx) { return handleInvalidation(NamespaceImpl::GetSchemaPtr)(ctx); }
-	void Insert(Item &item, const RdxContext &ctx) { handleInvalidation(NamespaceImpl::Insert)(item, ctx); }
-	void Insert(Item &item, QueryResults &qr, const RdxContext &ctx) {
-		nsFuncWrapper<&NamespaceImpl::modifyItem, ItemModifyMode::ModeInsert>(item, qr, ctx);
+	void Insert(Item &item, const NsContext &ctx) { handleInvalidation(NamespaceImpl::Insert)(item, ctx); }
+	void Insert(Item &item, QueryResults &qr, const NsContext &ctx) { nsFuncWrapper<&NamespaceImpl::Insert>(item, qr, ctx); }
+	void Update(Item &item, const NsContext &ctx) {
+		nsFuncWrapper<void (NamespaceImpl::*)(Item &, const NsContext &), &NamespaceImpl::Update>(item, ctx);
 	}
-	void Update(Item &item, const RdxContext &ctx) {
-		nsFuncWrapper<void (NamespaceImpl::*)(Item &, const RdxContext &), &NamespaceImpl::Update>(item, ctx);
+	void Update(Item &item, QueryResults &qr, const NsContext &ctx) { nsFuncWrapper<&NamespaceImpl::Update>(item, qr, ctx); }
+	void Update(const Query &query, QueryResults &result, const NsContext &ctx) {
+		nsFuncWrapper<&NamespaceImpl::Update>(query, result, ctx);
 	}
-	void Update(Item &item, QueryResults &qr, const RdxContext &ctx) {
-		nsFuncWrapper<&NamespaceImpl::modifyItem, ItemModifyMode::ModeUpdate>(item, qr, ctx);
+	void Upsert(Item &item, const NsContext &ctx) { handleInvalidation(NamespaceImpl::Upsert)(item, ctx); }
+	void Upsert(Item &item, QueryResults &qr, const NsContext &ctx) { nsFuncWrapper<&NamespaceImpl::Upsert>(item, qr, ctx); }
+	void Delete(Item &item, const NsContext &ctx) {
+		nsFuncWrapper<void (NamespaceImpl::*)(Item &, const NsContext &), &NamespaceImpl::Delete>(item, ctx);
 	}
-	void Update(const Query &query, QueryResults &result, const RdxContext &ctx) {
-		nsFuncWrapper<&NamespaceImpl::doUpdate, QueryType::QueryUpdate>(query, result, ctx);
+	void Delete(Item &item, QueryResults &qr, const NsContext &ctx) { nsFuncWrapper<&NamespaceImpl::Delete>(item, qr, ctx); }
+	void Delete(const Query &query, QueryResults &result, const NsContext &ctx) {
+		nsFuncWrapper<&NamespaceImpl::Delete>(query, result, ctx);
 	}
-	void Upsert(Item &item, const RdxContext &ctx) { handleInvalidation(NamespaceImpl::Upsert)(item, ctx); }
-	void Upsert(Item &item, QueryResults &qr, const RdxContext &ctx) {
-		nsFuncWrapper<&NamespaceImpl::modifyItem, ItemModifyMode::ModeUpsert>(item, qr, ctx);
-	}
-	void Delete(Item &item, const RdxContext &ctx) {
-		nsFuncWrapper<void (NamespaceImpl::*)(Item &, const RdxContext &), &NamespaceImpl::Delete>(item, ctx);
-	}
-	void Delete(Item &item, QueryResults &qr, const RdxContext &ctx) {
-		nsFuncWrapper<&NamespaceImpl::modifyItem, ItemModifyMode::ModeDelete>(item, qr, ctx);
-	}
-	void Delete(const Query &query, QueryResults &result, const RdxContext &ctx) {
-		nsFuncWrapper<&NamespaceImpl::doDelete, QueryType::QueryDelete>(query, result, ctx);
-	}
-	void Truncate(const RdxContext &ctx) { handleInvalidation(NamespaceImpl::Truncate)(ctx); }
+	void Truncate(const NsContext &ctx) { handleInvalidation(NamespaceImpl::Truncate)(ctx); }
 	void Select(QueryResults &result, SelectCtx &params, const RdxContext &ctx) {
 		handleInvalidation(NamespaceImpl::Select)(result, params, ctx);
 	}
@@ -94,7 +84,7 @@ public:
 	Item NewItem(const RdxContext &ctx) { return handleInvalidation(NamespaceImpl::NewItem)(ctx); }
 	void ToPool(ItemImpl *item) { handleInvalidation(NamespaceImpl::ToPool)(item); }
 	std::string GetMeta(const std::string &key, const RdxContext &ctx) { return handleInvalidation(NamespaceImpl::GetMeta)(key, ctx); }
-	void PutMeta(const std::string &key, std::string_view data, const RdxContext &ctx) {
+	void PutMeta(const std::string &key, std::string_view data, const NsContext &ctx) {
 		handleInvalidation(NamespaceImpl::PutMeta)(key, data, ctx);
 	}
 	int64_t GetSerial(const std::string &field) { return handleInvalidation(NamespaceImpl::GetSerial)(field); }
@@ -136,11 +126,10 @@ public:
 		copyPolicyMultiplier_.store(configData.copyPolicyMultiplier, std::memory_order_relaxed);
 		txSizeToAlwaysCopy_.store(configData.txSizeToAlwaysCopy, std::memory_order_relaxed);
 		longTxLoggingParams_.store(configProvider.GetTxLoggingParams(), std::memory_order_relaxed);
-		longUpdDelLoggingParams_.store(configProvider.GetUpdDelLoggingParams(), std::memory_order_relaxed);
 		handleInvalidation(NamespaceImpl::OnConfigUpdated)(configProvider, ctx);
 	}
 	StorageOpts GetStorageOpts(const RdxContext &ctx) { return handleInvalidation(NamespaceImpl::GetStorageOpts)(ctx); }
-	void Refill(std::vector<Item> &items, const RdxContext &ctx) { handleInvalidation(NamespaceImpl::Refill)(items, ctx); }
+	void Refill(std::vector<Item> &items, const NsContext &ctx) { handleInvalidation(NamespaceImpl::Refill)(items, ctx); }
 
 	void DumpIndex(std::ostream &os, std::string_view index, const RdxContext &ctx) {
 		return handleInvalidation(NamespaceImpl::DumpIndex)(os, index, ctx);
@@ -179,48 +168,31 @@ private:
 		}
 	}
 
-	template <void (NamespaceImpl::*fn)(Item &, ItemModifyMode, const NsContext &), ItemModifyMode mode>
+	template <void (NamespaceImpl::*fn)(Item &, const NsContext &)>
 	void nsFuncWrapper(Item &item, QueryResults &qr, NsContext ctx) const {
-		nsFuncWrapper<Item, void (NamespaceImpl::*)(Item &, ItemModifyMode, const NsContext &), fn, mode>(item, qr, ctx);
+		nsFuncWrapper<Item, void (NamespaceImpl::*)(Item &, const NsContext &), fn>(item, qr, ctx);
 	}
-
-	template <void (NamespaceImpl::*fn)(const Query &, QueryResults &, const NsContext &), QueryType queryType>
+	template <void (NamespaceImpl::*fn)(const Query &, QueryResults &, const NsContext &)>
 	void nsFuncWrapper(const Query &query, QueryResults &qr, NsContext ctx) const {
-		nsFuncWrapper<const Query, void (NamespaceImpl::*)(const Query &, QueryResults &, const NsContext &), fn, queryType>(query, qr,
-																															 ctx);
+		nsFuncWrapper<const Query, void (NamespaceImpl::*)(const Query &, QueryResults &, const NsContext &), fn>(query, qr, ctx);
 	}
-
-	template <typename T, typename FN, FN fn, std::conditional_t<std::is_same_v<T, Item>, ItemModifyMode, QueryType> enumVal>
+	template <typename T, typename FN, FN fn>
 	void nsFuncWrapper(T &v, QueryResults &qr, NsContext ctx) const {
+		assertrx(!ctx.noLock);
+		ctx.NoLock();
 		while (true) {
-			NamespaceImpl::Ptr ns;
+			std::shared_ptr<NamespaceImpl> ns;
 			bool added = false;
 			try {
 				ns = atomicLoadMainNs();
-				PerfStatCalculatorMT calc(ns->updatePerfCounter_, ns->enablePerfCounters_);
-				CounterGuardAIR32 cg(ns->cancelCommitCnt_);
+				const auto locker{ns->wLock(ctx.rdxContext)};
+				qr.AddNamespace(ns, ctx);
+				added = true;
 				if constexpr (std::is_same_v<T, Item>) {
-					auto locker{ns->wLock(ctx.rdxContext)};
-					calc.LockHit();
-					cg.Reset();
-					ns->checkApplySlaveUpdate(ctx.rdxContext.fromReplication_);
-					qr.AddNamespace(ns, true);
-					added = true;
-					(*ns.*fn)(v, enumVal, ctx);
+					(*ns.*fn)(v, ctx);
 					qr.AddItem(v, true, false);
-					ns->tryForceFlush(std::move(locker));
-				} else if constexpr (std::is_same_v<T, const Query>) {
-					auto params = longUpdDelLoggingParams_.load(std::memory_order_relaxed);
-					const bool isEnabled = params.thresholdUs >= 0 && !isSystemNamespaceNameFast(v._namespace);
-					auto statCalculator = QueryStatCalculator(long_actions::MakeLogger<enumVal>(v, std::move(params)), isEnabled);
-					auto locker = statCalculator.CreateLock(*ns, &NamespaceImpl::wLock, ctx.rdxContext);
-					calc.LockHit();
-					cg.Reset();
-					ns->checkApplySlaveUpdate(ctx.rdxContext.fromReplication_);
-					qr.AddNamespace(ns, true);
-					added = true;
+				} else {
 					(*ns.*fn)(v, qr, ctx);
-					statCalculator.LogFlushDuration(*ns, &NamespaceImpl::tryForceFlush, std::move(locker));
 				}
 				return;
 			} catch (const Error &e) {
@@ -245,7 +217,7 @@ private:
 		ns_.reset(ns);
 	}
 
-	NamespaceImpl::Ptr ns_;
+	std::shared_ptr<NamespaceImpl> ns_;
 	std::unique_ptr<NamespaceImpl> nsCopy_;
 	std::atomic<bool> hasCopy_ = {false};
 	using Mutex = MarkedMutex<std::timed_mutex, MutexMark::CloneNs>;
@@ -258,8 +230,6 @@ private:
 	PerfStatCounterMT commitStatsCounter_;
 	PerfStatCounterMT copyStatsCounter_;
 	std::atomic<LongTxLoggingParams> longTxLoggingParams_;
-	std::atomic<LongQueriesLoggingParams> longUpdDelLoggingParams_;
-	BackgroundNamespaceDeleter &bgDeleter_;
 };
 
 #undef handleInvalidation

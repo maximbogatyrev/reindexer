@@ -774,7 +774,7 @@ Error Replicator::applyWALRecord(LSNPair LSNs, std::string_view nsName, Namespac
 			break;
 		// Metadata updated
 		case WalPutMeta:
-			slaveNs->PutMeta(std::string(rec.putMeta.key), rec.putMeta.value, dummyCtx_);
+			slaveNs->PutMeta(std::string(rec.putMeta.key), rec.putMeta.value, NsContext(dummyCtx_));
 			stat.updatedMeta++;
 			break;
 		// Update query
@@ -784,15 +784,16 @@ Error Replicator::applyWALRecord(LSNPair LSNs, std::string_view nsName, Namespac
 			QueryResults result;
 			Query q;
 			q.FromSQL(rec.data);
+			const auto nsCtx = NsContext(rdxContext);
 			switch (q.type_) {
 				case QueryDelete:
-					slaveNs->Delete(q, result, rdxContext);
+					slaveNs->Delete(q, result, nsCtx);
 					break;
 				case QueryUpdate:
-					slaveNs->Update(q, result, rdxContext);
+					slaveNs->Update(q, result, nsCtx);
 					break;
 				case QueryTruncate:
-					slaveNs->Truncate(rdxContext);
+					slaveNs->Truncate(nsCtx);
 					break;
 				case QuerySelect:
 					break;
@@ -863,21 +864,22 @@ Error Replicator::modifyItem(LSNPair LSNs, Namespace::Ptr &slaveNs, std::string_
 
 	if (err.ok()) {
 		RdxContext rdxContext(true, LSNs);
+		auto nsCtx = NsContext(rdxContext);
 		switch (modifyMode) {
 			case ModeDelete:
-				slaveNs->Delete(item, rdxContext);
+				slaveNs->Delete(item, nsCtx);
 				stat.deleted++;
 				break;
 			case ModeInsert:
-				slaveNs->Insert(item, rdxContext);
+				slaveNs->Insert(item, nsCtx);
 				stat.updated++;
 				break;
 			case ModeUpsert:
-				slaveNs->Upsert(item, rdxContext);
+				slaveNs->Upsert(item, nsCtx);
 				stat.updated++;
 				break;
 			case ModeUpdate:
-				slaveNs->Update(item, rdxContext);
+				slaveNs->Update(item, nsCtx);
 				stat.updated++;
 				break;
 			default:
@@ -944,7 +946,7 @@ Error Replicator::syncMetaForced(Namespace::Ptr &slaveNs, std::string_view nsNam
 			continue;
 		}
 		try {
-			slaveNs->PutMeta(key, data, dummyCtx_);
+			slaveNs->PutMeta(key, data, NsContext(dummyCtx_));
 		} catch (const Error &e) {
 			logPrintf(LogError, "[repl:%s]:%d Error set meta '%s': %s", slaveNs->GetName(dummyCtx_), config_.serverId, key, e.what());
 		}

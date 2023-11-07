@@ -36,7 +36,6 @@ typedef enum IndexType {
 	IndexTtl = 18,
 	IndexRTree = 19,
 	IndexUuidHash = 20,
-	IndexUuidStore = 21,
 } IndexType;
 
 typedef enum QueryItemType {

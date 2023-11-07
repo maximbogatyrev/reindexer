@@ -327,6 +327,7 @@ static void parseFilter(const JsonValue& filter, Query& q, std::vector<std::pair
 			switch (condition) {
 				case CondGe:
 				case CondGt:
+				case CondEq:
 				case CondLt:
 				case CondLe:
 				case CondLike:
@@ -339,7 +340,6 @@ static void parseFilter(const JsonValue& filter, Query& q, std::vector<std::pair
 						throw Error(errLogic, "Condition RANGE must have exact 2 values, but %d values was provided", values.size());
 					}
 					break;
-				case CondEq:
 				case CondSet:
 				case CondAllSet:
 					break;
@@ -573,7 +573,7 @@ static void parseUpdateFields(const JsonValue& updateFields, Query& query) {
 				}
 				case UpdateField::IsArray:
 					checkJsonValueType(value, name, JSON_TRUE, JSON_FALSE);
-					values.MarkArray(value.getTag() == JSON_TRUE);
+					if (value.getTag() == JSON_TRUE) values.MarkArray();
 					break;
 				case UpdateField::Values:
 					checkJsonValueType(value, name, JSON_ARRAY);
@@ -581,13 +581,10 @@ static void parseUpdateFields(const JsonValue& updateFields, Query& query) {
 					break;
 			}
 		}
-		if (isExpression && (values.size() != 1 || !values.front().Type().template Is<KeyValueType::String>()))
-			throw Error(errParseDSL, "The array \"values\" must contain only a string type value for the type \"expression\"");
-
 		if (isObject) {
-			query.SetObject(fieldName, std::move(values));
+			query.SetObject(fieldName, values);
 		} else {
-			query.Set(fieldName, std::move(values), isExpression);
+			query.Set(fieldName, values, isExpression);
 		}
 	}
 }

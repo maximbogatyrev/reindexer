@@ -17,7 +17,7 @@ public:
 	using ref_type = typename IndexUnordered<T>::ref_type;
 
 	FastIndexText(const FastIndexText& other) : Base(other) {
-		initConfig(other.getConfig());
+		initConfig(other.GetConfig());
 		for (auto& idx : this->idx_map) idx.second.SetVDocID(FtKeyEntryData::ndoc);
 		this->CommitFulltext();
 	}
@@ -38,18 +38,16 @@ public:
 				&holder_->rowId2Vdoc_};
 	}
 	reindexer::FtPreselectT FtPreselect(const RdxContext& rdxCtx) override final;
-	bool EnablePreselectBeforeFt() const override final { return getConfig()->enablePreselectBeforeFt; }
+	bool EnablePreselectBeforeFt() const override final { return GetConfig()->enablePreselectBeforeFt; }
 
 protected:
 	void commitFulltextImpl() override final;
-	FtFastConfig* getConfig() const noexcept { return dynamic_cast<FtFastConfig*>(this->cfg_.get()); }
+	FtFastConfig* GetConfig() const;
 	void initConfig(const FtFastConfig* = nullptr);
 	void initHolder(FtFastConfig&);
+
 	template <class Data>
 	void buildVdocs(Data& data);
-	template <typename F>
-	void appendMergedIds(IDataHolder::MergeData& merged, size_t releventDocs, F&& appender);
-
 	std::unique_ptr<IDataHolder> holder_;
 };
 

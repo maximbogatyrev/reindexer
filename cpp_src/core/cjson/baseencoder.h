@@ -69,7 +69,7 @@ protected:
 	TagsPath curTagsPath_;
 	IndexedTagsPathInternalT indexedTagsPath_;
 	TagsLengths tagsLengths_;
-	ScalarIndexesSetT objectScalarIndexes_;
+	std::bitset<kMaxIndexes> objectScalarIndexes_;
 };
 
 using JsonEncoder = BaseEncoder<JsonBuilder>;

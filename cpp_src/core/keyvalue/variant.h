@@ -126,8 +126,9 @@ public:
 	KeyValueType Type() const noexcept {
 		if (isUuid()) {
 			return KeyValueType::Uuid{};
+		} else {
+			return variant_.type;
 		}
-		return variant_.type;
 	}
 
 	Variant &convert(KeyValueType type, const PayloadType * = nullptr, const FieldsSet * = nullptr) &;
@@ -216,14 +217,7 @@ public:
 	VariantArray() noexcept = default;
 	explicit VariantArray(Point) noexcept;
 	explicit operator Point() const;
-	VariantArray &MarkArray(bool v = true) &noexcept {
-		isArrayValue = v;
-		return *this;
-	}
-	VariantArray &&MarkArray(bool v = true) &&noexcept {
-		isArrayValue = v;
-		return std::move(*this);
-	}
+	void MarkArray() noexcept { isArrayValue = true; }
 	void MarkObject() noexcept { isObjectValue = true; }
 	using h_vector<Variant, 2>::h_vector;
 	using h_vector<Variant, 2>::operator==;
@@ -247,11 +241,6 @@ public:
 	template <typename... Ts>
 	static VariantArray Create(Ts &&...vs) {
 		return VariantArray{Variant{std::forward<Ts>(vs)}...};
-	}
-	void Clear() noexcept {
-		clear<false>();
-		isArrayValue = false;
-		isObjectValue = false;
 	}
 
 private:

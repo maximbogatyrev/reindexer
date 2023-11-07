@@ -467,7 +467,6 @@ func initNsForExplain(t *testing.T, ns string, count int) {
 
 type expectedExplain struct {
 	Field       string
-	FieldType   string
 	Method      string
 	Keys        int
 	Comparators int
@@ -475,26 +474,6 @@ type expectedExplain struct {
 	Preselect   []expectedExplain
 	JoinSelect  []expectedExplain
 	Selectors   []expectedExplain
-}
-
-type expectedExplainConditionInjection struct {
-	InitialCondition   string
-	AggType            string
-	Succeed            bool
-	Reason             string
-	NewCondition       string
-	ValuesCount        int
-	ConditionSelectors []expectedExplain
-}
-
-type expectedExplainJoinOnInjections struct {
-	RightNsName       string
-	JoinOnCondition   string
-	Succeed           bool
-	Reason            string
-	Type              string
-	InjectedCondition string
-	Conditions        []expectedExplainConditionInjection
 }
 
 func checkExplain(t *testing.T, res []reindexer.ExplainSelector, expected []expectedExplain, fieldName string) {
@@ -507,7 +486,6 @@ func checkExplain(t *testing.T, res []reindexer.ExplainSelector, expected []expe
 		} else {
 			assert.Equalf(t, len(res[i].Selectors), 0, fieldName+expected[i].Field)
 			assert.Equalf(t, expected[i].Field, res[i].Field, fieldName+expected[i].Field)
-			assert.Equalf(t, expected[i].FieldType, res[i].FieldType, fieldName+expected[i].Field)
 			assert.Equalf(t, expected[i].Method, res[i].Method, fieldName+expected[i].Field)
 			assert.Equalf(t, expected[i].Matched, res[i].Matched, fieldName+expected[i].Field)
 			assert.Equalf(t, expected[i].Keys, res[i].Keys, fieldName+expected[i].Field)
@@ -522,39 +500,6 @@ func checkExplain(t *testing.T, res []reindexer.ExplainSelector, expected []expe
 			} else {
 				checkExplain(t, res[i].ExplainSelect.Selectors, expected[i].JoinSelect, fieldName+expected[i].Field+" -> ")
 			}
-		}
-	}
-}
-
-func checkExplainConditionInjection(t *testing.T, resConditions []reindexer.ExplainConditionInjection, expectedConditions []expectedExplainConditionInjection) {
-	for i := 0; i < len(expectedConditions); i++ {
-		assert.Equal(t, expectedConditions[i].InitialCondition, resConditions[i].InitialCondition)
-		assert.Equal(t, expectedConditions[i].AggType, resConditions[i].AggType)
-		assert.Equal(t, expectedConditions[i].Succeed, resConditions[i].Succeed)
-		assert.Equal(t, expectedConditions[i].Reason, resConditions[i].Reason)
-		assert.Equal(t, expectedConditions[i].NewCondition, resConditions[i].NewCondition)
-		assert.Equal(t, expectedConditions[i].ValuesCount, resConditions[i].ValuesCount)
-		if len(expectedConditions[i].ConditionSelectors) == 0 {
-			assert.Nil(t, resConditions[i].Explain)
-		} else {
-			checkExplain(t, resConditions[i].Explain.Selectors, expectedConditions[i].ConditionSelectors, "")
-		}
-	}
-}
-
-func checkExplainJoinOnInjections(t *testing.T, res []reindexer.ExplainJoinOnInjections, expected []expectedExplainJoinOnInjections) {
-	require.Equal(t, len(expected), len(res))
-	for i := 0; i < len(expected); i++ {
-		assert.Equal(t, expected[i].RightNsName, res[i].RightNsName)
-		assert.Equal(t, expected[i].JoinOnCondition, res[i].JoinOnCondition)
-		assert.Equal(t, expected[i].Succeed, res[i].Succeed)
-		assert.Equal(t, expected[i].Reason, res[i].Reason)
-		assert.Equal(t, expected[i].Type, res[i].Type)
-		assert.Equal(t, expected[i].InjectedCondition, res[i].InjectedCondition)
-		if len(expected[i].Conditions) == 0 {
-			assert.Nil(t, res[i].Conditions)
-		} else {
-			checkExplainConditionInjection(t, res[i].Conditions, expected[i].Conditions)
 		}
 	}
 }
@@ -590,7 +535,6 @@ func TestExplainJoin(t *testing.T) {
 		},
 		{
 			Field:       "not data",
-			FieldType:   "indexed",
 			Method:      "index",
 			Keys:        1,
 			Comparators: 0,
@@ -601,7 +545,6 @@ func TestExplainJoin(t *testing.T) {
 			Selectors: []expectedExplain{
 				{
 					Field:       "id",
-					FieldType:   "indexed",
 					Method:      "scan",
 					Keys:        0,
 					Comparators: 1,
@@ -617,7 +560,6 @@ func TestExplainJoin(t *testing.T) {
 					JoinSelect: []expectedExplain{
 						{
 							Field:       "id",
-							FieldType:   "indexed",
 							Method:      "index",
 							Keys:        1,
 							Comparators: 0,
@@ -625,7 +567,6 @@ func TestExplainJoin(t *testing.T) {
 						},
 						{
 							Field:       "data",
-							FieldType:   "indexed",
 							Method:      "scan",
 							Keys:        0,
 							Comparators: 1,
@@ -640,7 +581,6 @@ func TestExplainJoin(t *testing.T) {
 			Selectors: []expectedExplain{
 				{
 					Field:       "id",
-					FieldType:   "indexed",
 					Method:      "scan",
 					Keys:        0,
 					Comparators: 1,
@@ -655,7 +595,6 @@ func TestExplainJoin(t *testing.T) {
 					Preselect: []expectedExplain{
 						{
 							Field:       "data",
-							FieldType:   "indexed",
 							Method:      "index",
 							Keys:        3,
 							Comparators: 0,
@@ -668,7 +607,6 @@ func TestExplainJoin(t *testing.T) {
 		},
 		{
 			Field:       "or id",
-			FieldType:   "indexed",
 			Method:      "index",
 			Keys:        1,
 			Comparators: 0,
@@ -683,7 +621,6 @@ func TestExplainJoin(t *testing.T) {
 			Preselect: []expectedExplain{
 				{
 					Field:       "data",
-					FieldType:   "indexed",
 					Method:      "index",
 					Keys:        1,
 					Comparators: 0,
@@ -693,55 +630,4 @@ func TestExplainJoin(t *testing.T) {
 			JoinSelect: nil,
 		},
 	}, "")
-	checkExplainJoinOnInjections(t, explainRes.OnConditionsInjections, []expectedExplainJoinOnInjections{
-		{
-			RightNsName:       "test_explain_joined",
-			JoinOnCondition:   "INNER JOIN ON (test_explain_joined.id = id)",
-			Succeed:           true,
-			Type:              "select",
-			InjectedCondition: "(id IN (...) )",
-			Conditions: []expectedExplainConditionInjection{
-				{
-					InitialCondition: "test_explain_joined.id = id",
-					AggType:          "distinct",
-					Succeed:          true,
-					NewCondition:     "id IN (...)",
-					ValuesCount:      19,
-					ConditionSelectors: []expectedExplain{
-						{
-							Field:       "id",
-							FieldType:   "indexed",
-							Method:      "index",
-							Keys:        20,
-							Comparators: 0,
-							Matched:     20,
-						},
-						{
-							Field:       "data",
-							FieldType:   "indexed",
-							Method:      "scan",
-							Keys:        0,
-							Comparators: 1,
-							Matched:     19,
-						},
-					},
-				},
-			},
-		},
-		{
-			RightNsName:       "test_explain_joined",
-			JoinOnCondition:   "OR INNER JOIN ON (test_explain_joined.id = id)",
-			Succeed:           true,
-			Type:              "by_value",
-			InjectedCondition: "(id IN (...) )",
-			Conditions: []expectedExplainConditionInjection{
-				{
-					InitialCondition: "test_explain_joined.id = id",
-					Succeed:          true,
-					NewCondition:     "id IN (...)",
-					ValuesCount:      3,
-				},
-			},
-		},
-	})
 }

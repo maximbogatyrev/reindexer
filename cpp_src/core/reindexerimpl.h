@@ -200,13 +200,14 @@ protected:
 		std::unordered_map<std::string_view, StatsSelectMutex, nocase_hash_str, nocase_equal_str> mtxMap_;
 	};
 
-	template <typename T, typename QueryType>
+	template <typename T>
 	void doSelect(const Query &q, QueryResults &result, NsLocker<T> &locks, SelectFunctionsHolder &func, const RdxContext &ctx,
-				  QueryStatCalculator<QueryType> &queryStatCalculator);
+				  QueryStatCalculator<Query> &queryStatCalculator);
 	struct QueryResultsContext;
 	template <typename T>
 	JoinedSelectors prepareJoinedSelectors(const Query &q, QueryResults &result, NsLocker<T> &locks, SelectFunctionsHolder &func,
 										   std::vector<QueryResultsContext> &, const RdxContext &ctx);
+	void prepareJoinResults(const Query &q, QueryResults &result);
 	static bool isPreResultValuesModeOptimizationAvailable(const Query &jItemQ, const NamespaceImpl::Ptr &jns, const Query &mainQ);
 
 	FilterNsNamesT detectFilterNsNames(const Query &q);
@@ -246,7 +247,6 @@ protected:
 	BackgroundThread backgroundThread_;
 	BackgroundThread storageFlushingThread_;
 	std::atomic<bool> dbDestroyed_ = {false};
-	BackgroundNamespaceDeleter bgDeleter_;
 
 	QueriesStatTracer queriesStatTracker_;
 	UpdatesObservers observers_;

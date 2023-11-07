@@ -1,5 +1,4 @@
 #include "dslencoder.h"
-
 #include <unordered_map>
 #include "core/cjson/jsonbuilder.h"
 #include "core/keyvalue/key_string.h"

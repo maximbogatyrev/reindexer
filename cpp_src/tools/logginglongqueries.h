@@ -8,6 +8,7 @@ namespace reindexer {
 
 class Query;
 class Transaction;
+
 class ExplainCalc;
 
 namespace long_actions {
@@ -47,6 +48,21 @@ constexpr DurationStorageIdx DurationStorageIdxCast(MutexMark mark) {
 	}
 }
 
+template <>
+struct ActionWrapper<Transaction> {
+	const Transaction& tx;
+	LongTxLoggingParams thresholds;
+	const bool& wasCopied;
+
+	using ArrayT = std::array<std::optional<std::chrono::microseconds>, size_t(DurationStorageIdx::StorageSize)>;
+	ArrayT durationStorage = {};
+
+	void Add(DurationStorageIdx idx, std::chrono::microseconds time) {
+		auto& val = durationStorage[static_cast<int>(idx)];
+		val ? * val += time : val = time;
+	}
+};
+
 enum class ExplainDuration {
 	Total,
 	Prepare,
@@ -57,40 +73,10 @@ enum class ExplainDuration {
 	ExplainDurationSize,
 };
 
-template <QueryType Enum>
-struct QueryEnum2Type : std::integral_constant<QueryType, Enum> {};
-
-struct LockDurationStorage {
-	using ArrayT = std::array<std::optional<std::chrono::microseconds>, size_t(DurationStorageIdx::StorageSize)>;
-	ArrayT durationStorage = {};
-	void Add(DurationStorageIdx idx, std::chrono::microseconds time) {
-		auto& val = durationStorage[static_cast<int>(idx)];
-		val ? * val += time : val = time;
-	}
-};
-
-struct QueryParams {
+template <>
+struct ActionWrapper<Query> {
 	const Query& query;
 	LongQueriesLoggingParams loggingParams;
-};
-
-struct TransactionParams {
-	const Transaction& tx;
-	LongTxLoggingParams thresholds;
-	const bool& wasCopied;
-};
-
-template <>
-struct ActionWrapper<Transaction> : TransactionParams, LockDurationStorage {
-	template <typename... Args>
-	ActionWrapper(Args&&... args) : TransactionParams{std::forward<Args>(args)...}, LockDurationStorage() {}
-};
-
-template <>
-struct ActionWrapper<QueryEnum2Type<QueryType::QuerySelect>> : QueryParams {
-	template <typename... Args>
-	ActionWrapper(Args&&... args) : QueryParams{std::forward<Args>(args)...} {}
-
 	using ArrayT = std::array<std::chrono::microseconds, size_t(ExplainDuration::ExplainDurationSize)>;
 	std::optional<ArrayT> durationStorage = std::nullopt;
 
@@ -102,22 +88,11 @@ private:
 	void add(const ExplainCalc&);
 };
 
-template <>
-struct ActionWrapper<QueryEnum2Type<QueryType::QueryUpdate>> : QueryParams, LockDurationStorage {
-	template <typename... Args>
-	ActionWrapper(Args&&... args) : QueryParams{std::forward<Args>(args)...}, LockDurationStorage{} {}
-};
-
-template <>
-struct ActionWrapper<QueryEnum2Type<QueryType::QueryDelete>> : QueryParams, LockDurationStorage {
-	template <typename... Args>
-	ActionWrapper(Args&&... args) : QueryParams{std::forward<Args>(args)...}, LockDurationStorage{} {}
-};
-
-template <typename T>
+template <typename T = void>
 struct Logger {
-	Logger() = default;
 	static constexpr bool isEnabled = !std::is_empty_v<ActionWrapper<T>>;
+	template <typename ActionType, typename... Args>
+	Logger(const ActionType& action, Args&&... args) : wrapper_(ActionWrapper<ActionType>{action, std::forward<Args>(args)...}) {}
 
 	void Dump(std::chrono::microseconds time);
 	template <typename... Args>
@@ -126,40 +101,15 @@ struct Logger {
 	}
 
 private:
-	template <typename... Args>
-	friend auto MakeLogger(Args&&... args);
-
-	template <QueryType queryType, typename... Args>
-	friend auto MakeLogger(Args&&... args);
-
-	template <typename ActionType, typename... Args>
-	Logger(const ActionType& action, Args&&... args) : wrapper_(ActionWrapper<T>{action, std::forward<Args>(args)...}) {}
 	ActionWrapper<T> wrapper_;
 };
 
-template <typename... Args>
-auto MakeLogger(Args&&... args) {
-	return Logger<Transaction>{std::forward<Args>(args)...};
-}
-
-template <QueryType queryType, typename... Args>
-auto MakeLogger(Args&&... args) {
-	return Logger<QueryEnum2Type<queryType>>{std::forward<Args>(args)...};
-}
-
 template <>
-void Logger<QueryEnum2Type<QueryType::QuerySelect>>::Dump(std::chrono::microseconds);
-template <>
-void Logger<QueryEnum2Type<QueryType::QueryUpdate>>::Dump(std::chrono::microseconds);
-template <>
-void Logger<QueryEnum2Type<QueryType::QueryDelete>>::Dump(std::chrono::microseconds);
+void Logger<Query>::Dump(std::chrono::microseconds);
 template <>
 void Logger<Transaction>::Dump(std::chrono::microseconds);
 
+extern template struct Logger<Query>;
 extern template struct Logger<Transaction>;
-extern template struct Logger<QueryEnum2Type<QueryType::QuerySelect>>;
-extern template struct Logger<QueryEnum2Type<QueryType::QueryUpdate>>;
-extern template struct Logger<QueryEnum2Type<QueryType::QueryDelete>>;
-
 }  // namespace long_actions
 }  // namespace reindexer

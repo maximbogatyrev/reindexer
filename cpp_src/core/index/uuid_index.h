@@ -13,6 +13,7 @@ public:
 	std::unique_ptr<Index> Clone() const override { return std::unique_ptr<Index>{new UuidIndex{*this}}; }
 	using Base::Upsert;
 	void Upsert(VariantArray& result, const VariantArray& keys, IdType id, bool& clearCache) override;	// TODO delete this after #1353
+	bool IsUuid() const noexcept override { return true; }
 };
 
 std::unique_ptr<Index> IndexUuid_New(const IndexDef& idef, PayloadType payloadType, const FieldsSet& fields);
