@@ -72,10 +72,19 @@ public:
 			} else {
 				if (withOrder) {
 					if constexpr (kTreeFields) {
+						std::cout << "Expected Results:" << std::endl;
+						for (const auto& p : expectedResults) {
+							std::cout << std::get<0>(p) << "  |  " << std::get<1>(p) << "  |  " << std::get<2>(p) << std::endl;
+						}
+
 						EXPECT_EQ(it, expectedResults.begin())
 							<< "Found not in order: \"" << item["ft1"].As<std::string>() << "\" \"" << item["ft2"].As<std::string>()
 							<< "\" \"" << item["ft3"].As<std::string>() << "\"\nQuery: " << query;
 					} else {
+						std::cout << "Expected Results:" << std::endl;
+						for (const auto& p : expectedResults) {
+							std::cout << std::get<0>(p) << "  |  " << std::get<1>(p) << std::endl;
+						}
 						EXPECT_EQ(it, expectedResults.begin()) << "Found not in order: \"" << item["ft1"].As<std::string>() << "\" \""
 															   << item["ft2"].As<std::string>() << "\"\nQuery: " << query;
 					}
