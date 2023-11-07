@@ -10,9 +10,7 @@ protected:
 };
 
 TEST_P(FTStressApi, BasicStress) {
-	const std::string kStorage = reindexer::fs::JoinPath(reindexer::fs::GetTempDir(), "reindex_FTApi/BasicStress");
-	reindexer::fs::RmDirAll(kStorage);
-	Init(GetDefaultConfig(), NS1, kStorage);
+	Init(GetDefaultConfig());
 
 	std::vector<std::string> data;
 	std::vector<std::string> phrase;
@@ -31,8 +29,7 @@ TEST_P(FTStressApi, BasicStress) {
 	std::thread statsThread([&] {
 		while (!terminate) {
 			reindexer::QueryResults qr;
-			const auto err = rt.reindexer->Select(reindexer::Query("#memstats"), qr);
-			ASSERT_TRUE(err.ok()) << err.what();
+			rt.reindexer->Select(reindexer::Query("#memstats"), qr);
 			std::this_thread::sleep_for(std::chrono::milliseconds(10));
 		}
 	});
@@ -92,8 +89,7 @@ TEST_P(FTStressApi, ConcurrencyCheck) {
 				lck.unlock();
 				while (!terminate) {
 					reindexer::QueryResults qr;
-					const auto err = rt.reindexer->Select(reindexer::Query("#memstats"), qr);
-					ASSERT_TRUE(err.ok()) << err.what();
+					rt.reindexer->Select(reindexer::Query("#memstats"), qr);
 				}
 			});
 		} else {

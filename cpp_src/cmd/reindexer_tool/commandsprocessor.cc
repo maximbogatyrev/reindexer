@@ -3,8 +3,8 @@
 #include <iostream>
 #include "client/cororeindexer.h"
 #include "core/reindexer.h"
+#include "tableviewscroller.h"
 #include "tools/fsops.h"
-#include "tools/terminalutils.h"
 
 namespace reindexer_tool {
 
@@ -30,13 +30,9 @@ template <typename T>
 void CommandsProcessor<DBInterface>::setCompletionCallback(T& rx, void (T::*set_completion_callback)(new_v_callback_t const&)) {
 	(rx.*set_completion_callback)([this](std::string const& input, int) -> replxx::Replxx::completions_t {
 		std::vector<std::string> completions;
-		const auto err = executor_.GetSuggestions(input, completions);
+		executor_.GetSuggestions(input, completions);
 		replxx::Replxx::completions_t result;
-		if (err.ok()) {
-			for (const std::string& suggestion : completions) {
-				result.emplace_back(suggestion);
-			}
-		}
+		for (const std::string& suggestion : completions) result.emplace_back(suggestion);
 		return result;
 	});
 }
@@ -47,8 +43,7 @@ void CommandsProcessor<DBInterface>::setCompletionCallback(T& rx, void (T::*set_
 	(rx.*set_completion_callback)(
 		[this](std::string const& input, int, void*) -> replxx::Replxx::completions_t {
 			std::vector<std::string> completions;
-			const auto err = executor_.GetSuggestions(input, completions);
-			if (!err.ok()) return {};
+			executor_.GetSuggestions(input, completions);
 			return completions;
 		},
 		nullptr);

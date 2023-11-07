@@ -18,24 +18,22 @@ struct IRdxCancelContext {
 	virtual ~IRdxCancelContext() = default;
 };
 
-constexpr std::string_view kDefaultTimeoutError = "Context timeout";
-constexpr std::string_view kDefaultCancelError = "Context was canceled";
-
 template <typename Context>
-void ThrowOnCancel(const Context& ctx, std::string_view errMsg = std::string_view()) {
+void ThrowOnCancel(const Context& ctx, std::string_view errMsg = std::string_view()) {	// TODO may be ""sv
 	if (!ctx.isCancelable()) return;
 
-	const auto cancel = ctx.checkCancel();
+	auto cancel = ctx.checkCancel();
 	switch (cancel) {
 		case CancelType::Explicit:
-			throw Error(errCanceled, errMsg.empty() ? kDefaultCancelError : errMsg);
+			throw Error(errCanceled, errMsg);
 		case CancelType::Timeout:
-			throw Error(errTimeout, errMsg.empty() ? kDefaultTimeoutError : errMsg);
+			throw Error(errTimeout, errMsg);
 		case CancelType::None:
 			return;
+		default:
+			assertrx(false);
+			throw Error(errCanceled, errMsg);
 	}
-	assertrx(false);
-	throw Error(errCanceled, errMsg.empty() ? kDefaultCancelError : errMsg);
 }
 
 class RdxDeadlineContext : public IRdxCancelContext {
@@ -158,7 +156,7 @@ public:
 										std::move(user), connectionId);
 	}
 	InternalRdxContext WithContextParams(milliseconds timeout, std::string_view activityTracer, std::string&& user,
-										 int connectionId) const {
+										  int connectionId) const {
 		return activityTracer.empty()
 				   ? InternalRdxContext(cmpl_, RdxDeadlineContext(timeout, deadlineCtx_.parent()), activityTracer_, user_, connectionId_)
 				   : InternalRdxContext(cmpl_, RdxDeadlineContext(timeout, deadlineCtx_.parent()),

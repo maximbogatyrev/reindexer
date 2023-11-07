@@ -266,9 +266,8 @@ public:
 		reindexer::WrSerializer wrser;
 		reindexer::Serializer rdser(cjson);
 
-		std::deque<std::string> storage;
-		reindexer::CJsonDecoder decoder(const_cast<reindexer::TagsMatcher&>(nsTypes.first), storage);
-		ASSERT_NO_THROW(decoder.Decode<>(pl, rdser, wrser));
+		reindexer::CJsonDecoder decoder(const_cast<reindexer::TagsMatcher&>(nsTypes.first));
+		ASSERT_NO_THROW(decoder.Decode(pl, rdser, wrser));
 		ASSERT_TRUE(rdser.Eof());
 	}
 

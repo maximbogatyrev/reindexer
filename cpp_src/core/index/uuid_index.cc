@@ -10,9 +10,8 @@ void UuidIndex::Upsert(VariantArray &result, const VariantArray &keys, IdType id
 	}
 }
 
-std::unique_ptr<Index> IndexUuid_New(const IndexDef &idef, PayloadType &&payloadType, FieldsSet &&fields,
-									 const NamespaceCacheConfigData &cacheCfg) {
-	return std::make_unique<UuidIndex>(idef, std::move(payloadType), std::move(fields), cacheCfg);
+std::unique_ptr<Index> IndexUuid_New(const IndexDef &idef, PayloadType payloadType, const FieldsSet &fields) {
+	return std::unique_ptr<Index>{new UuidIndex{idef, std::move(payloadType), fields}};
 }
 
 }  // namespace reindexer

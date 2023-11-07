@@ -67,8 +67,4 @@ Transaction::time_point Transaction::GetStartTime() const {
 	return impl_->startTime_;
 }
 
-void Transaction::ValidatePK(const FieldsSet &pkFields) {
-	if (impl_) impl_->ValidatePK(pkFields);
-}
-
 }  // namespace reindexer

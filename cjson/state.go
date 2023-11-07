@@ -36,7 +36,7 @@ func (state *State) Copy() State {
 	}
 }
 
-func (state *State) ReadPayloadType(s *Serializer, loggerOwner LoggerOwner, ns string) State {
+func (state *State) ReadPayloadType(s *Serializer) State {
 	state.lock.Lock()
 	defer state.lock.Unlock()
 	stateToken := int32(s.GetVarUInt())
@@ -44,12 +44,6 @@ func (state *State) ReadPayloadType(s *Serializer, loggerOwner LoggerOwner, ns s
 	skip := state.Version >= version && state.StateToken == stateToken
 
 	if !skip {
-		if loggerOwner != nil {
-			if logger := loggerOwner.GetLogger(); logger != nil {
-				logger.Printf(3, "rq: '%s' TagsMatcher was updated: { state_token: 0x%08X, version: %d } -> { state_token: 0x%08X, version: %d }",
-					ns, state.StateToken, state.Version, uint32(stateToken), version)
-			}
-		}
 		state.StateData = &StateData{Version: version, StateToken: stateToken}
 	}
 	state.tagsMatcher.Read(s, skip)
@@ -63,10 +57,10 @@ func (state *State) NewEncoder() Encoder {
 	}
 }
 
-func (state *State) NewDecoder(item interface{}, loggerOwner LoggerOwner) Decoder {
+func (state *State) NewDecoder(item interface{}, logger Logger) Decoder {
 	dec := Decoder{
-		state:       state,
-		loggerOwner: loggerOwner,
+		state:  state,
+		logger: logger,
 	}
 
 	dec.state.sCacheLock.RLock()

@@ -1,3 +1,5 @@
+
+
 #include "serverconnection.h"
 #include <errno.h>
 #include <snappy.h>
@@ -8,18 +10,19 @@ namespace reindexer {
 namespace net {
 namespace cproto {
 
-const auto kCProtoTimeoutSec = 300;
+const auto kCProtoTimeoutSec = 300.;
 const auto kUpdatesResendTimeout = 0.1;
 const auto kMaxUpdatesBufSize = 1024 * 1024 * 8;
 
-ServerConnection::ServerConnection(socket &&s, ev::dynamic_loop &loop, Dispatcher &dispatcher, bool enableStat, size_t maxUpdatesSize,
+ServerConnection::ServerConnection(int fd, ev::dynamic_loop &loop, Dispatcher &dispatcher, bool enableStat, size_t maxUpdatesSize,
 								   bool enableCustomBalancing)
-	: ConnectionST(std::move(s), loop, enableStat, kConnReadbufSize, kConnWriteBufSize, kCProtoTimeoutSec),
+	: net::ConnectionST(fd, loop, enableStat),
 	  dispatcher_(dispatcher),
 	  updatesSize_(0),
 	  updateLostFlag_(false),
 	  maxUpdatesSize_(maxUpdatesSize),
 	  balancingType_(enableCustomBalancing ? BalancingType::NotSet : BalancingType::None) {
+	timeout_.start(kCProtoTimeoutSec);
 	updates_async_.set<ServerConnection, &ServerConnection::async_cb>(this);
 	updates_timeout_.set<ServerConnection, &ServerConnection::timeout_cb>(this);
 	updates_async_.set(loop);
@@ -28,22 +31,24 @@ ServerConnection::ServerConnection(socket &&s, ev::dynamic_loop &loop, Dispatche
 	updates_timeout_.start(kUpdatesResendTimeout, kUpdatesResendTimeout);
 	updates_async_.start();
 
-	BaseConnT::callback(BaseConnT::io_, ev::READ);
+	callback(io_, ev::READ);
 }
 
-ServerConnection::~ServerConnection() { BaseConnT::closeConn(); }
+ServerConnection::~ServerConnection() { closeConn(); }
 
-bool ServerConnection::Restart(socket &&s) {
-	BaseConnT::restart(std::move(s));
+bool ServerConnection::Restart(int fd) {
+	restart(fd);
+	timeout_.start(kCProtoTimeoutSec);
 	updates_async_.start();
-	BaseConnT::callback(BaseConnT::io_, ev::READ);
+	callback(io_, ev::READ);
 	return true;
 }
 
 void ServerConnection::Attach(ev::dynamic_loop &loop) {
-	BaseConnT::async_.set<ServerConnection, &ServerConnection::async_cb>(this);
-	if (!BaseConnT::attached_) {
-		BaseConnT::attach(loop);
+	async_.set<ServerConnection, &ServerConnection::async_cb>(this);
+	if (!attached_) {
+		attach(loop);
+		timeout_.start(kCProtoTimeoutSec);
 		updates_async_.set(loop);
 		updates_async_.start();
 		updates_timeout_.set(loop);
@@ -52,8 +57,8 @@ void ServerConnection::Attach(ev::dynamic_loop &loop) {
 }
 
 void ServerConnection::Detach() {
-	if (BaseConnT::attached_) {
-		BaseConnT::detach();
+	if (attached_) {
+		detach();
 		updates_async_.stop();
 		updates_async_.reset();
 		updates_timeout_.stop();
@@ -62,9 +67,9 @@ void ServerConnection::Detach() {
 }
 
 void ServerConnection::onClose() {
-	if (dispatcher_.OnCloseRef()) {
+	if (dispatcher_.onClose_) {
 		Context ctx{"", nullptr, this, {{}, {}}, false};
-		dispatcher_.OnCloseRef()(ctx, errOK);
+		dispatcher_.onClose_(ctx, errOK);
 	}
 	clientData_.reset();
 	balancingType_ = BalancingType::NotSet;
@@ -72,30 +77,26 @@ void ServerConnection::onClose() {
 	std::unique_lock<std::mutex> lck(updates_mtx_);
 	updates_.clear();
 	updatesSize_ = 0;
-	if (BaseConnT::stats_) {
-		BaseConnT::stats_->update_pended_updates(0);
-	}
+	if (ConnectionST::stats_) ConnectionST::stats_->update_pended_updates(0);
 }
 
 void ServerConnection::handleRPC(Context &ctx) {
-	Error err = dispatcher_.Handle(ctx);
+	Error err = dispatcher_.handle(ctx);
 
 	if (!ctx.respSent) {
 		responceRPC(ctx, err, Args());
 	}
 }
 
-ServerConnection::BaseConnT::ReadResT ServerConnection::onRead() {
+ServerConnection::ReadResT ServerConnection::onRead() {
 	CProtoHeader hdr;
 
-	while (!BaseConnT::closeConn_) {
-		Context ctx{BaseConnT::clientAddr_, nullptr, this, {{}, {}}, false};
+	while (!closeConn_) {
+		Context ctx{clientAddr_, nullptr, this, {{}, {}}, false};
 		std::string uncompressed;
 
-		auto len = BaseConnT::rdBuf_.peek(reinterpret_cast<char *>(&hdr), sizeof(hdr));
-		if (len < sizeof(hdr)) {
-			return BaseConnT::ReadResT::Default;
-		}
+		auto len = rdBuf_.peek(reinterpret_cast<char *>(&hdr), sizeof(hdr));
+		if (len < sizeof(hdr)) return ReadResT::Default;
 
 		if (hdr.magic != kCprotoMagic) {
 			try {
@@ -103,8 +104,8 @@ ServerConnection::BaseConnT::ReadResT ServerConnection::onRead() {
 			} catch (const Error &err) {
 				fprintf(stderr, "responceRPC unexpected error: %s\n", err.what().c_str());
 			}
-			BaseConnT::closeConn_ = true;
-			return BaseConnT::ReadResT::Default;
+			closeConn_ = true;
+			return ReadResT::Default;
 		}
 
 		if (hdr.version < kCprotoMinCompatVersion) {
@@ -116,43 +117,44 @@ ServerConnection::BaseConnT::ReadResT ServerConnection::onRead() {
 			} catch (const Error &err) {
 				fprintf(stderr, "responceRPC unexpected error: %s\n", err.what().c_str());
 			}
-			BaseConnT::closeConn_ = true;
-			return BaseConnT::ReadResT::Default;
+			closeConn_ = true;
+			return ReadResT::Default;
 		}
 		// Enable compression, only if clients sand compressed data to us
 		enableSnappy_ = (hdr.version >= kCprotoMinSnappyVersion) && hdr.compressed;
 
 		// Rebalance connection, when first message was recieved
-		if rx_unlikely (balancingType_ == BalancingType::NotSet) {
-			balancingType_ = (hdr.dedicatedThread && hdr.version >= kCprotoMinDedicatedThreadsVersion) ? BalancingType::Dedicated
-																									   : BalancingType::Shared;
+		if (balancingType_ == BalancingType::NotSet) {
+			if (hdr.dedicatedThread && hdr.version >= kCprotoMinDedicatedThreadsVersion) {
+				balancingType_ = BalancingType::Dedicated;
+			} else {
+				balancingType_ = BalancingType::Shared;
+			}
 			hasPendingData_ = true;
 			if (rebalance_) {
 				rebalance_(this, balancingType_);
 				// After rebalancing this connection will probably be handled in another thread. Any code here after rebalance_() may lead
 				// to data race
-				return BaseConnT::ReadResT::Rebalanced;
+				return ReadResT::Rebalanced;
 			}
-			return BaseConnT::ReadResT::Default;
+			return ReadResT::Default;
 		}
 
-		if (size_t(hdr.len) + sizeof(hdr) > BaseConnT::rdBuf_.capacity()) {
-			BaseConnT::rdBuf_.reserve(size_t(hdr.len) + sizeof(hdr) + 0x1000);
+		if (size_t(hdr.len) + sizeof(hdr) > rdBuf_.capacity()) {
+			rdBuf_.reserve(size_t(hdr.len) + sizeof(hdr) + 0x1000);
 		}
 
-		if (size_t(hdr.len) + sizeof(hdr) > BaseConnT::rdBuf_.size()) {
-			if (!BaseConnT::rdBuf_.size()) {
-				BaseConnT::rdBuf_.clear();
-			}
-			return BaseConnT::ReadResT::Default;
+		if (size_t(hdr.len) + sizeof(hdr) > rdBuf_.size()) {
+			if (!rdBuf_.size()) rdBuf_.clear();
+			return ReadResT::Default;
 		}
 
-		BaseConnT::rdBuf_.erase(sizeof(hdr));
+		rdBuf_.erase(sizeof(hdr));
 
-		auto it = BaseConnT::rdBuf_.tail();
+		auto it = rdBuf_.tail();
 		if (it.size() < size_t(hdr.len)) {
-			BaseConnT::rdBuf_.unroll();
-			it = BaseConnT::rdBuf_.tail();
+			rdBuf_.unroll();
+			it = rdBuf_.tail();
 		}
 		assertrx(it.size() >= size_t(hdr.len));
 
@@ -163,7 +165,7 @@ ServerConnection::BaseConnT::ReadResT ServerConnection::onRead() {
 			ctx.call->seq = hdr.seq;
 			Serializer ser(it.data(), hdr.len);
 			if (hdr.compressed) {
-				if rx_unlikely (!snappy::Uncompress(it.data(), hdr.len, &uncompressed)) {
+				if (!snappy::Uncompress(it.data(), hdr.len, &uncompressed)) {
 					throw Error(errParseBin, "Can't decompress data from peer");
 				}
 
@@ -187,14 +189,14 @@ ServerConnection::BaseConnT::ReadResT ServerConnection::onRead() {
 		} catch (const std::exception &err) {
 			handleException(ctx, Error(errLogic, err.what()));
 		} catch (...) {
-			handleException(ctx, Error(errLogic, "Unknown exception"));
+			handleException(ctx, Error(errLogic, "Unknow exception"));
 		}
 
-		BaseConnT::rdBuf_.erase(hdr.len);
+		rdBuf_.erase(hdr.len);
+		timeout_.start(kCProtoTimeoutSec);
 	}
-	return BaseConnT::ReadResT::Default;
+	return ReadResT::Default;
 }
-
 static void packRPC(WrSerializer &ser, Context &ctx, const Error &status, const Args &args, bool enableSnappy) {
 	CProtoHeader hdr;
 	hdr.len = 0;
@@ -237,21 +239,19 @@ static chunk packRPC(chunk chunk, Context &ctx, const Error &status, const Args 
 }
 
 void ServerConnection::responceRPC(Context &ctx, const Error &status, const Args &args) {
-	if rx_unlikely (ctx.respSent) {
+	if (ctx.respSent) {
 		fprintf(stderr, "Warning - RPC responce already sent\n");
 		return;
 	}
 
-	auto &&chunk = packRPC(BaseConnT::wrBuf_.get_chunk(), ctx, status, args, enableSnappy_);
-	auto len = chunk.len();
-	BaseConnT::wrBuf_.write(std::move(chunk));
-	if (BaseConnT::stats_) {
-		BaseConnT::stats_->update_send_buf_size(BaseConnT::wrBuf_.data_size());
-	}
+	auto &&chunk = packRPC(wrBuf_.get_chunk(), ctx, status, args, enableSnappy_);
+	auto len = chunk.len_;
+	wrBuf_.write(std::move(chunk));
+	if (ConnectionST::stats_) ConnectionST::stats_->update_send_buf_size(wrBuf_.data_size());
 
-	if (dispatcher_.OnResponseRef()) {
+	if (dispatcher_.onResponse_) {
 		ctx.stat.sizeStat.respSizeBytes = len;
-		dispatcher_.OnResponseRef()(ctx);
+		dispatcher_.onResponse_(ctx);
 	}
 
 	ctx.respSent = true;
@@ -259,15 +259,15 @@ void ServerConnection::responceRPC(Context &ctx, const Error &status, const Args
 	//		write_cb();
 	//	}
 
-	if (dispatcher_.LoggerRef()) {
-		dispatcher_.LoggerRef()(ctx, status, args);
+	if (dispatcher_.logger_ != nullptr) {
+		dispatcher_.logger_(ctx, status, args);
 	}
 }
 
 void ServerConnection::CallRPC(const IRPCCall &call) {
 	std::lock_guard lck(updates_mtx_);
 	updates_.emplace_back(call);
-	updatesSize_ += call.data_->capacity();
+	updatesSize_ += call.data_->size();
 
 	if (updatesSize_ > maxUpdatesSize_) {
 		updates_.clear();
@@ -292,21 +292,21 @@ void ServerConnection::CallRPC(const IRPCCall &call) {
 		updates_.emplace_back(std::move(callLost));
 		updateLostFlag_ = true;
 
-		if (BaseConnT::stats_) {
-			if (auto stat = BaseConnT::stats_->get_stat(); stat) {
+		if (ConnectionST::stats_) {
+			if (auto stat = ConnectionST::stats_->get_stat(); stat) {
 				stat->updates_lost.fetch_add(1, std::memory_order_relaxed);
 				stat->pended_updates.store(1, std::memory_order_relaxed);
 			}
 		}
-	} else if (BaseConnT::stats_) {
-		if (auto stat = BaseConnT::stats_->get_stat(); stat) {
+	} else if (ConnectionST::stats_) {
+		if (auto stat = ConnectionST::stats_->get_stat(); stat) {
 			stat->pended_updates.store(updates_.size(), std::memory_order_relaxed);
 		}
 	}
 }
 
 void ServerConnection::sendUpdates() {
-	if (BaseConnT::wrBuf_.size() + 10 > BaseConnT::wrBuf_.capacity() || BaseConnT::wrBuf_.data_size() > kMaxUpdatesBufSize / 2) {
+	if (wrBuf_.size() + 10 > wrBuf_.capacity() || wrBuf_.data_size() > kMaxUpdatesBufSize / 2) {
 		return;
 	}
 
@@ -329,7 +329,7 @@ void ServerConnection::sendUpdates() {
 	size_t len = 0;
 	Args args;
 	CmdCode cmd;
-	WrSerializer ser(BaseConnT::wrBuf_.get_chunk());
+	WrSerializer ser(wrBuf_.get_chunk());
 	size_t cnt = 0;
 	size_t updatesSizeBuffered = 0;
 	for (cnt = 0; cnt < updates.size() && ser.Len() < kMaxUpdatesBufSize; ++cnt) {
@@ -343,7 +343,7 @@ void ServerConnection::sendUpdates() {
 
 	len = ser.Len();
 	try {
-		BaseConnT::wrBuf_.write(ser.DetachChunk());
+		wrBuf_.write(ser.DetachChunk());
 	} catch (...) {
 		RPCCall callLost{kCmdUpdates, 0, {}, milliseconds(0)};
 		cproto::Context ctxLost{"", &callLost, this, {{}, {}}, false};
@@ -359,15 +359,15 @@ void ServerConnection::sendUpdates() {
 			packRPC(ser, ctxLost, Error(), {Arg(std::string(""))}, enableSnappy_);
 			len = ser.Len();
 			wrBuf_.write(ser.DetachChunk());
-			if (BaseConnT::stats_) {
-				BaseConnT::stats_->update_send_buf_size(wrBuf_.data_size());
-				BaseConnT::stats_->update_pended_updates(0);
+			if (ConnectionST::stats_) {
+				ConnectionST::stats_->update_send_buf_size(wrBuf_.data_size());
+				ConnectionST::stats_->update_pended_updates(0);
 			}
 		}
 
-		if (dispatcher_.OnResponseRef()) {
+		if (dispatcher_.onResponse_) {
 			ctx.stat.sizeStat.respSizeBytes = len;
-			dispatcher_.OnResponseRef()(ctxLost);
+			dispatcher_.onResponse_(ctxLost);
 		}
 
 		callback(io_, ev::WRITE);
@@ -381,27 +381,25 @@ void ServerConnection::sendUpdates() {
 			updatesSize_ += updatesSizeCopy - updatesSizeBuffered;
 		}
 
-		if (BaseConnT::stats_) stats_->update_pended_updates(updates.size());
-	} else if (BaseConnT::stats_) {
-		if (auto stat = BaseConnT::stats_->get_stat(); stat) {
+		if (ConnectionST::stats_) stats_->update_pended_updates(updates.size());
+	} else if (ConnectionST::stats_) {
+		if (auto stat = ConnectionST::stats_->get_stat(); stat) {
 			std::lock_guard lck(updates_mtx_);
 			stat->pended_updates.store(updates_.size(), std::memory_order_relaxed);
 		}
 	}
 
-	if (BaseConnT::stats_) {
-		BaseConnT::stats_->update_send_buf_size(BaseConnT::wrBuf_.data_size());
-	}
+	if (ConnectionST::stats_) ConnectionST::stats_->update_send_buf_size(wrBuf_.data_size());
 
-	if (dispatcher_.OnResponseRef()) {
+	if (dispatcher_.onResponse_) {
 		ctx.stat.sizeStat.respSizeBytes = len;
-		dispatcher_.OnResponseRef()(ctx);
+		dispatcher_.onResponse_(ctx);
 	}
 
-	BaseConnT::callback(BaseConnT::io_, ev::WRITE);
+	callback(io_, ev::WRITE);
 }
 
-void ServerConnection::handleException(Context &ctx, const Error &err) noexcept {
+void ServerConnection::handleException(Context &ctx, const Error &err) {
 	// Exception occurs on unrecoverable error. Send responce, and drop connection
 	fprintf(stderr, "Dropping RPC-connection. Reason: %s\n", err.what().c_str());
 	try {
@@ -415,7 +413,7 @@ void ServerConnection::handleException(Context &ctx, const Error &err) noexcept 
 	} catch (...) {
 		fprintf(stderr, "responceRPC unexpected error (unknow exception)\n");
 	}
-	BaseConnT::closeConn_ = true;
+	closeConn_ = true;
 }
 
 }  // namespace cproto

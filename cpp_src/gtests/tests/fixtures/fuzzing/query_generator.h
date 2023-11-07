@@ -1,6 +1,6 @@
 #pragma once
 
-#include "random_generator.h"
+#include "ns.h"
 
 namespace reindexer {
 
@@ -10,11 +10,10 @@ class Query;
 
 namespace fuzzing {
 
-class Ns;
-
 class QueryGenerator {
 public:
-	QueryGenerator(const std::vector<Ns>& nss, RandomGenerator::ErrFactorType errorFactor) : namespaces_{nss}, rndGen_{errorFactor} {}
+	QueryGenerator(const std::vector<Ns>& nss, std::ostream& os, RandomGenerator::ErrFactorType errorFactor)
+		: namespaces_{nss}, rndGen_{os, errorFactor} {}
 	reindexer::Query operator()();
 
 private:

@@ -26,7 +26,6 @@ CoroRPCClient::CoroRPCClient(const ReindexerConfig& config) : config_(config) {
 CoroRPCClient::~CoroRPCClient() { Stop(); }
 
 Error CoroRPCClient::Connect(const std::string& dsn, ev::dynamic_loop& loop, const client::ConnectOpts& opts) {
-	using namespace std::string_view_literals;
 	if (conn_.IsRunning()) {
 		return Error(errLogic, "Client is already started");
 	}
@@ -35,15 +34,9 @@ Error CoroRPCClient::Connect(const std::string& dsn, ev::dynamic_loop& loop, con
 	if (!connectData.uri.parse(dsn)) {
 		return Error(errParams, "%s is not valid uri", dsn);
 	}
-#ifdef _WIN32
-	if (connectData.uri.scheme() != "cproto"sv) {
+	if (connectData.uri.scheme() != "cproto") {
 		return Error(errParams, "Scheme must be cproto");
 	}
-#else
-	if (connectData.uri.scheme() != "cproto"sv && connectData.uri.scheme() != "ucproto"sv) {
-		return Error(errParams, "Scheme must be either cproto or ucproto");
-	}
-#endif
 	connectData.opts = cproto::CoroClientConnection::Options(
 		config_.ConnectTimeout, config_.RequestTimeout, opts.IsCreateDBIfMissing(), opts.HasExpectedClusterID(), opts.ExpectedClusterID(),
 		config_.ReconnectAttempts, config_.EnableCompression, config_.RequestDedicatedThread, config_.AppName);
@@ -53,12 +46,13 @@ Error CoroRPCClient::Connect(const std::string& dsn, ev::dynamic_loop& loop, con
 	return errOK;
 }
 
-void CoroRPCClient::Stop() {
+Error CoroRPCClient::Stop() {
 	terminate_ = true;
 	conn_.Stop();
 	resubWg_.wait();
 	loop_ = nullptr;
 	terminate_ = false;
+	return errOK;
 }
 
 Error CoroRPCClient::AddNamespace(const NamespaceDef& nsDef, const InternalRdxContext& ctx) {
@@ -242,7 +236,7 @@ Error CoroRPCClient::Delete(const Query& query, CoroQueryResults& result, const 
 	query.Serialize(ser);
 
 	NsArray nsArray;
-	query.WalkNested(true, true, [this, &nsArray](const Query& q) { nsArray.push_back(getNamespace(q.NsName())); });
+	query.WalkNested(true, true, [this, &nsArray](const Query& q) { nsArray.push_back(getNamespace(q._namespace)); });
 
 	result = CoroQueryResults(&conn_, std::move(nsArray), 0, config_.FetchAmount, config_.RequestTimeout);
 
@@ -263,7 +257,7 @@ Error CoroRPCClient::Update(const Query& query, CoroQueryResults& result, const 
 	query.Serialize(ser);
 
 	NsArray nsArray;
-	query.WalkNested(true, true, [this, &nsArray](const Query& q) { nsArray.push_back(getNamespace(q.NsName())); });
+	query.WalkNested(true, true, [this, &nsArray](const Query& q) { nsArray.push_back(getNamespace(q._namespace)); });
 
 	result = CoroQueryResults(&conn_, std::move(nsArray), 0, config_.FetchAmount, config_.RequestTimeout);
 
@@ -328,7 +322,7 @@ Error CoroRPCClient::selectImpl(const Query& query, CoroQueryResults& result, se
 	}
 	NsArray nsArray;
 	query.Serialize(qser);
-	query.WalkNested(true, true, [this, &nsArray](const Query& q) { nsArray.push_back(getNamespace(q.NsName())); });
+	query.WalkNested(true, true, [this, &nsArray](const Query& q) { nsArray.push_back(getNamespace(q._namespace)); });
 	h_vector<int32_t, 4> vers;
 	for (auto& ns : nsArray) {
 		vers.push_back(ns->tagsMatcher_.version() ^ ns->tagsMatcher_.stateToken());

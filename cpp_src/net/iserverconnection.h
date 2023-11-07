@@ -6,8 +6,6 @@
 namespace reindexer {
 namespace net {
 
-class socket;
-
 /// Server side network connection interface for Listener.
 class IServerConnection {
 public:
@@ -31,9 +29,9 @@ public:
 	virtual void HandlePendingData() = 0;
 
 	/// Restart connection
-	/// @param s - socket of the accepted connection.
+	/// @param fd - file descriptor of accepted connection.
 	/// @return true - if successfuly restarted, false - if connection can't be restarted.
-	virtual bool Restart(socket &&s) = 0;
+	virtual bool Restart(int fd) = 0;
 	/// Attach connection to another listener loop. Must be called from thread of loop
 	/// @param loop - another loop to bind
 	virtual void Attach(ev::dynamic_loop &loop) = 0;
@@ -43,9 +41,9 @@ public:
 
 /// Functor factory type for creating new connection. Listener will call this factory after accept of client connection.
 /// @param loop - Current loop of Listener's thread.
-/// @param s - Socket of the accepted connection.
+/// @param fd file  - Descriptor of accepted connection.
 /// @param allowCustomBalancing - true, if caller supports custom balancing hints
-typedef std::function<IServerConnection *(ev::dynamic_loop &loop, socket &&s, bool allowCustomBalancing)> ConnectionFactory;
+typedef std::function<IServerConnection *(ev::dynamic_loop &loop, int fd, bool allowCustomBalancing)> ConnectionFactory;
 
 }  // namespace net
 }  // namespace reindexer

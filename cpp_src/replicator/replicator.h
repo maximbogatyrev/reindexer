@@ -40,34 +40,11 @@ protected:
 		Error err;
 		uint64_t count = 0;
 	};
-	class SyncQueue {
-	public:
-		SyncQueue(const std::mutex &replicatorMtx) noexcept : replicatorMtx_(replicatorMtx) {}
-		void Push(const std::string &nsName, NamespaceDef &&nsDef, bool force);
-		bool Get(NamespaceDef &def, bool &force) const;
-		bool Pop(std::string_view nsName, const std::unique_lock<std::mutex> &replicatorLock) noexcept;
-		size_t Size() const noexcept { return size_.load(std::memory_order_acquire); }
-		bool Contains(std::string_view nsName) noexcept;
-		void Clear() noexcept;
-
-	private:
-		struct recordData {
-			recordData() = default;
-			recordData(NamespaceDef &&_def, bool _forced) : def(std::move(_def)), forced(_forced) {}
-
-			NamespaceDef def;
-			bool forced = false;
-		};
-		fast_hash_map<std::string, recordData, nocase_hash_str, nocase_equal_str, nocase_less_str> queue_;
-		std::atomic<size_t> size_ = {0};
-		mutable std::mutex mtx_;
-		const std::mutex &replicatorMtx_;
-	};
 
 	void run();
 	void stop();
 	// Sync single namespace
-	Error syncNamespace(const NamespaceDef &ns, std::string_view forceSyncReason, SyncQueue *sourceQueue);
+	Error syncNamespace(const NamespaceDef &ns, std::string_view forceSyncReason);
 	// Sync database
 	Error syncDatabase();
 	// Read and apply WAL from master
@@ -91,8 +68,6 @@ protected:
 	// Apply single cjson item
 	Error modifyItem(LSNPair LSNs, Namespace::Ptr &ns, std::string_view cjson, int modifyMode, const TagsMatcher &tm, SyncStat &stat);
 	static Error unpackItem(Item &, lsn_t, std::string_view cjson, const TagsMatcher &tm);
-	// Push update to the queue to apply it later
-	void pushPendingUpdate(LSNPair LSNs, std::string_view nsName, const WALRecord &wrec);
 
 	void OnWALUpdate(LSNPair LSNs, std::string_view nsName, const WALRecord &walRec) override final;
 	void OnUpdatesLost(std::string_view nsName) override final;
@@ -138,7 +113,25 @@ protected:
 	const RdxContext dummyCtx_;
 	std::unordered_map<const Namespace *, Transaction> transactions_;
 	fast_hash_map<std::string, NsErrorMsg, nocase_hash_str, nocase_equal_str, nocase_less_str> lastNsErrMsg_;
-	SyncQueue syncQueue_;
+
+	class SyncQuery {
+	public:
+		SyncQuery() {}
+		void Push(const std::string &nsName, NamespaceDef &&nsDef, bool force);
+		bool Pop(NamespaceDef &def, bool &force);
+
+	private:
+		struct recordData {
+			recordData() = default;
+			recordData(NamespaceDef &&_def, bool _forced) : def(std::move(_def)), forced(_forced) {}
+
+			NamespaceDef def;
+			bool forced = false;
+		};
+		std::unordered_map<std::string, recordData> query_;
+		std::mutex mtx_;
+	};
+	SyncQuery syncQuery_;
 };
 
 }  // namespace reindexer

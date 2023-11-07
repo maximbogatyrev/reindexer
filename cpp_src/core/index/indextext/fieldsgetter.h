@@ -1,5 +1,6 @@
 #pragma once
 #include "core/ft/usingcontainer.h"
+#include "core/index/payload_map.h"
 #include "core/payload/fieldsset.h"
 #include "vendor/utf8cpp/utf8.h"
 

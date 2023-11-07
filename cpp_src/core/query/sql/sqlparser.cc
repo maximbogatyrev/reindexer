@@ -6,7 +6,6 @@
 #include "core/queryresults/aggregationresult.h"
 #include "core/type_consts_helpers.h"
 #include "sqltokentype.h"
-#include "tools/stringstools.h"
 #include "vendor/double-conversion/double-conversion.h"
 #include "vendor/gason/gason.h"
 
@@ -92,16 +91,16 @@ int SQLParser::selectParse(tokenizer &parser) {
 			parser.next_token();
 			tok = peekSqlToken(parser, SingleSelectFieldSqlToken);
 			if (name.text() == "count"sv) {
-				query_.CalcTotal(ModeAccurateTotal);
+				query_.calcTotal = ModeAccurateTotal;
 				if (!wasSelectFilter) {
-					query_.Limit(0);
+					query_.count = 0;
 				}
 				tok = parser.next_token();
 				if (tok.text() != "*") throw Error(errParseSQL, "Expected '*', but found '%s' in query, %s", tok.text(), parser.where());
 			} else if (name.text() == "count_cached"sv) {
-				query_.CalcTotal(ModeCachedTotal);
+				query_.calcTotal = ModeCachedTotal;
 				if (!wasSelectFilter) {
-					query_.Limit(0);
+					query_.count = 0;
 				}
 				tok = parser.next_token();
 				if (tok.text() != "*"sv) throw Error(errParseSQL, "Expected '*', but found '%s' in query, %s", tok.text(), parser.where());
@@ -169,13 +168,13 @@ int SQLParser::selectParse(tokenizer &parser) {
 				throw Error(errConflict, kAggregationWithSelectFieldsMsgError);
 			}
 			query_.selectFilter_.emplace_back(nameWithCase.text());
-			query_.Limit(QueryEntry::kDefaultLimit);
+			query_.count = QueryEntry::kDefaultLimit;
 			wasSelectFilter = true;
 		} else if (name.text() == "*"sv) {
 			if (!query_.CanAddSelectFilter()) {
 				throw Error(errConflict, kAggregationWithSelectFieldsMsgError);
 			}
-			query_.Limit(QueryEntry::kDefaultLimit);
+			query_.count = QueryEntry::kDefaultLimit;
 			wasSelectFilter = true;
 			query_.selectFilter_.clear();
 		}
@@ -188,8 +187,8 @@ int SQLParser::selectParse(tokenizer &parser) {
 		throw Error(errParams, "Expected 'FROM', but found '%s' in query, %s", tok.text(), parser.where());
 
 	peekSqlToken(parser, NamespaceSqlToken);
-	query_.SetNsName(parser.next_token().text());
-	ctx_.updateLinkedNs(query_.NsName());
+	query_._namespace = std::string(parser.next_token().text());
+	ctx_.updateLinkedNs(query_._namespace);
 
 	while (!parser.end()) {
 		tok = peekSqlToken(parser, SelectConditionsStart);
@@ -201,17 +200,17 @@ int SQLParser::selectParse(tokenizer &parser) {
 			tok = parser.next_token();
 			if (tok.type != TokenNumber)
 				throw Error(errParseSQL, "Expected number, but found '%s' in query, %s", tok.text(), parser.where());
-			query_.Limit(stoi(tok.text()));
+			query_.count = stoi(tok.text());
 		} else if (tok.text() == "offset"sv) {
 			parser.next_token();
 			tok = parser.next_token();
 			if (tok.type != TokenNumber)
 				throw Error(errParseSQL, "Expected number, but found '%s' in query, %s", tok.text(), parser.where());
-			query_.Offset(stoi(tok.text()));
+			query_.start = stoi(tok.text());
 		} else if (tok.text() == "order"sv) {
 			parser.next_token();
 			parseOrderBy(parser, query_.sortingEntries_, query_.forcedSortOrder_);
-			ctx_.updateLinkedNs(query_.NsName());
+			ctx_.updateLinkedNs(query_._namespace);
 		} else if (tok.text() == "join"sv) {
 			parser.next_token();
 			parseJoin(JoinType::LeftJoin, parser);
@@ -403,8 +402,8 @@ int SQLParser::deleteParse(tokenizer &parser) {
 		throw Error(errParams, "Expected 'FROM', but found '%s' in query, %s", tok.text(), parser.where());
 
 	peekSqlToken(parser, NamespaceSqlToken);
-	query_.SetNsName(parser.next_token().text());
-	ctx_.updateLinkedNs(query_.NsName());
+	query_._namespace = std::string(parser.next_token().text());
+	ctx_.updateLinkedNs(query_._namespace);
 
 	while (!parser.end()) {
 		tok = peekSqlToken(parser, DeleteConditionsStart);
@@ -416,17 +415,17 @@ int SQLParser::deleteParse(tokenizer &parser) {
 			tok = parser.next_token();
 			if (tok.type != TokenNumber)
 				throw Error(errParseSQL, "Expected number, but found '%s' in query, %s", tok.text(), parser.where());
-			query_.Limit(stoi(tok.text()));
+			query_.count = stoi(tok.text());
 		} else if (tok.text() == "offset"sv) {
 			parser.next_token();
 			tok = parser.next_token();
 			if (tok.type != TokenNumber)
 				throw Error(errParseSQL, "Expected number, but found '%s' in query, %s", tok.text(), parser.where());
-			query_.Offset(stoi(tok.text()));
+			query_.start = stoi(tok.text());
 		} else if (tok.text() == "order"sv) {
 			parser.next_token();
 			parseOrderBy(parser, query_.sortingEntries_, query_.forcedSortOrder_);
-			ctx_.updateLinkedNs(query_.NsName());
+			ctx_.updateLinkedNs(query_._namespace);
 		} else
 			break;
 	}
@@ -492,7 +491,7 @@ UpdateEntry SQLParser::parseUpdateField(tokenizer &parser) {
 	if (tok.type != TokenName) {
 		throw Error(errParseSQL, "Expected field name but found '%s' in query %s", tok.text(), parser.where());
 	}
-	UpdateEntry updateField{tok.text(), {}};
+	UpdateEntry updateField{{tok.text().data(), tok.text().length()}, {}};
 
 	parser.next_token();
 	tok = parser.next_token();
@@ -546,8 +545,8 @@ int SQLParser::updateParse(tokenizer &parser) {
 	parser.next_token();
 
 	token tok = peekSqlToken(parser, NamespaceSqlToken);
-	query_.SetNsName(tok.text());
-	ctx_.updateLinkedNs(query_.NsName());
+	query_._namespace = std::string(tok.text());
+	ctx_.updateLinkedNs(query_._namespace);
 	parser.next_token();
 
 	tok = peekSqlToken(parser, UpdateOptionsSqlToken);
@@ -587,8 +586,8 @@ int SQLParser::updateParse(tokenizer &parser) {
 int SQLParser::truncateParse(tokenizer &parser) {
 	parser.next_token();
 	token tok = peekSqlToken(parser, NamespaceSqlToken);
-	query_.SetNsName(tok.text());
-	ctx_.updateLinkedNs(query_.NsName());
+	query_._namespace = std::string(tok.text());
+	ctx_.updateLinkedNs(query_._namespace);
 	parser.next_token();
 	return 0;
 }
@@ -651,7 +650,7 @@ int SQLParser::parseWhere(tokenizer &parser) {
 				nextOp = OpAnd;
 			} else {
 				// Index name
-				std::string index{tok.text()};
+				const std::string index{tok.text()};
 
 				// Operator
 				CondType condition;
@@ -674,13 +673,13 @@ int SQLParser::parseWhere(tokenizer &parser) {
 				if (ctx_.autocompleteMode) peekSqlToken(parser, WhereFieldValueSqlToken, false);
 				tok = parser.next_token();
 				if (iequals(tok.text(), "null"sv) || iequals(tok.text(), "empty"sv)) {
-					query_.entries.Append(nextOp, QueryEntry{std::move(index), CondEmpty, {}});
+					query_.entries.Append(nextOp, QueryEntry{index, CondEmpty, {}});
 				} else if (iequals(tok.text(), "not"sv)) {
 					tok = peekSqlToken(parser, WhereFieldNegateValueSqlToken, false);
 					if (!iequals(tok.text(), "null"sv) && !iequals(tok.text(), "empty"sv)) {
 						throw Error(errParseSQL, "Expected NULL, but found '%s' in query, %s", tok.text(), parser.where());
 					}
-					query_.entries.Append(nextOp, QueryEntry{std::move(index), CondAny, {}});
+					query_.entries.Append(nextOp, QueryEntry{index, CondAny, {}});
 					tok = parser.next_token(false);
 				} else if (tok.text() == "("sv) {
 					VariantArray values;
@@ -693,12 +692,12 @@ int SQLParser::parseWhere(tokenizer &parser) {
 						if (tok.text() != ","sv)
 							throw Error(errParseSQL, "Expected ')' or ',', but found '%s' in query, %s", tok.text(), parser.where());
 					}
-					query_.entries.Append(nextOp, QueryEntry{std::move(index), condition, std::move(values)});
+					query_.entries.Append(nextOp, QueryEntry{index, condition, std::move(values)});
 				} else if (tok.type != TokenName || toLower(tok.text()) == "true" || toLower(tok.text()) == "false") {
-					query_.entries.Append(nextOp, QueryEntry{std::move(index), condition, {token2kv(tok, parser, true)}});
+					query_.entries.Append(nextOp, QueryEntry{index, condition, {token2kv(tok, parser, true)}});
 					// Second field
 				} else {
-					query_.entries.Append(nextOp, BetweenFieldsQueryEntry{std::move(index), condition, std::string{tok.text()}});
+					query_.entries.Append(nextOp, BetweenFieldsQueryEntry{index, condition, std::string{tok.text()}});
 				}
 				nextOp = OpAnd;
 			}
@@ -767,7 +766,7 @@ void SQLParser::parseEqualPositions(tokenizer &parser, std::vector<std::pair<siz
 		}
 		bool validField = false;
 		for (auto it = query_.entries.begin_of_current_bracket(); it != query_.entries.end(); ++it) {
-			if (it->HoldsOrReferTo<QueryEntry>() && nameWithCase.text() == it->Value<QueryEntry>().FieldName()) {
+			if (it->HoldsOrReferTo<QueryEntry>() && nameWithCase.text() == it->Value<QueryEntry>().index) {
 				validField = true;
 				break;
 			}
@@ -934,11 +933,11 @@ void SQLParser::parseJoin(JoinType type, tokenizer &parser) {
 			throw Error(errParseSQL, "Expected ')', but found %s, %s", tok.text(), parser.where());
 		}
 	} else {
-		jquery.SetNsName(tok.text());
-		ctx_.updateLinkedNs(jquery.NsName());
+		jquery._namespace = std::string(tok.text());
+		ctx_.updateLinkedNs(jquery._namespace);
 	}
 	jquery.joinType = type;
-	jparser.parseJoinEntries(parser, query_.NsName(), jquery);
+	jparser.parseJoinEntries(parser, query_._namespace, jquery);
 
 	if (type != JoinType::LeftJoin) {
 		query_.entries.Append((type == JoinType::InnerJoin) ? OpAnd : OpOr, JoinQueryEntry(query_.joinQueries_.size()));
@@ -1024,25 +1023,28 @@ void SQLParser::parseJoinEntries(tokenizer &parser, const std::string &mainNs, J
 			return;
 		}
 
-		std::string ns1 = mainNs, ns2 = jquery.NsName();
-		std::string fld1 = parseJoinedFieldName(parser, ns1);
-		CondType condition = getCondType(parser.next_token().text());
-		std::string fld2 = parseJoinedFieldName(parser, ns2);
-		bool reverseNamespacesOrder{false};
+		QueryJoinEntry je;
+		std::string ns1 = mainNs, ns2 = jquery._namespace;
+		std::string idx1 = parseJoinedFieldName(parser, ns1);
+		je.condition_ = getCondType(parser.next_token().text());
+		std::string idx2 = parseJoinedFieldName(parser, ns2);
 
-		if (ns1 != mainNs || ns2 != jquery.NsName()) {
-			if (ns2 == mainNs && ns1 == jquery.NsName()) {
-				std::swap(fld1, fld2);
-				condition = InvertJoinCondition(condition);
-				reverseNamespacesOrder = true;
-			} else {
-				throw Error(errParseSQL, "Unexpected tables with ON statement: ('%s' and '%s') but expected ('%s' and '%s'), %s", ns1, ns2,
-							mainNs, jquery.NsName(), parser.where());
-			}
+		if (ns1 == mainNs && ns2 == jquery._namespace) {
+			je.index_ = std::move(idx1);
+			je.joinIndex_ = std::move(idx2);
+		} else if (ns2 == mainNs && ns1 == jquery._namespace) {
+			je.index_ = std::move(idx2);
+			je.joinIndex_ = std::move(idx1);
+			je.condition_ = InvertJoinCondition(je.condition_);
+			je.reverseNamespacesOrder = true;
+		} else {
+			throw Error(errParseSQL, "Unexpected tables with ON statement: ('%s' and '%s') but expected ('%s' and '%s'), %s", ns1, ns2,
+						mainNs, jquery._namespace, parser.where());
 		}
 
-		jquery.joinEntries_.emplace_back(jquery.nextOp_, condition, std::move(fld1), std::move(fld2), reverseNamespacesOrder);
+		je.op_ = jquery.nextOp_;
 		jquery.nextOp_ = OpAnd;
+		jquery.joinEntries_.emplace_back(std::move(je));
 		if (!braces) {
 			return;
 		}

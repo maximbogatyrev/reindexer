@@ -26,8 +26,6 @@ protected:
 		std::string name;
 		reindexer::KeyValueType type;
 	};
-	using IndexesData = std::unordered_map<std::string, std::vector<FieldData>>;
-
 	void Verify(const reindexer::QueryResults& qr, const reindexer::Query& query, reindexer::Reindexer& rx) {
 		std::unordered_set<std::vector<reindexer::VariantArray>, PkHash> pks;
 		std::unordered_map<std::string, std::unordered_set<std::string>> distincts;
@@ -42,14 +40,14 @@ protected:
 			ASSERT_TRUE(err.ok()) << err.what();
 			Verify(js.QueryResults(), js.JoinQuery(), rx);
 		}
-		const auto& indexesFields = indexesFields_[query.NsName()];
+		const auto& indexesFields = indexesFields_[query._namespace];
 		for (size_t i = 0; i < qr.Count(); ++i) {
 			reindexer::Item itemr(qr[i].GetItem(false));
 
-			auto pk = getPk(itemr, query.NsName());
+			auto pk = getPk(itemr, query._namespace);
 			EXPECT_TRUE(pks.insert(pk).second) << "Duplicated primary key: " + getPkString(pk);
 
-			InsertedItemsByPk& insertedItemsByPk = insertedItems_[query.NsName()];
+			InsertedItemsByPk& insertedItemsByPk = insertedItems_[query._namespace];
 			auto itInsertedItem = insertedItemsByPk.find(pk);
 			EXPECT_NE(itInsertedItem, insertedItemsByPk.end()) << "Item with such PK has not been inserted yet: " + getPkString(pk);
 			if (itInsertedItem != insertedItemsByPk.end()) {
@@ -144,14 +142,14 @@ protected:
 		// Check non found items, to not match conditions
 
 		// If query has limit and offset, skip verification
-		if (query.HasOffset() || query.HasLimit()) return;
+		if (query.start != 0 || query.count != reindexer::QueryEntry::kDefaultLimit) return;
 
 		// If query has distinct, skip verification
 		for (const auto& agg : query.aggregations_) {
 			if (agg.Type() == AggDistinct) return;
 		}
 
-		for (auto& insertedItem : insertedItems_[query.NsName()]) {
+		for (auto& insertedItem : insertedItems_[query._namespace]) {
 			if (pks.find(insertedItem.first) != pks.end()) continue;
 			bool conditionsSatisfied =
 				checkConditions(insertedItem.second, query.entries.cbegin(), query.entries.cend(), joinedSelectors, indexesFields);
@@ -163,7 +161,7 @@ protected:
 		}
 
 		auto aggResults = qr.GetAggregationResults();
-		if (query.CalcTotal() != ModeNoTotal) {
+		if (query.calcTotal != ModeNoTotal) {
 			// calcTotal from version 3.0.2  also return total count in aggregations, so we have remove it from here for
 			// clean compare aggresults with aggregations
 			aggResults.pop_back();
@@ -234,7 +232,7 @@ protected:
 private:
 	bool checkConditions(const reindexer::Item& item, reindexer::QueryEntries::const_iterator it,
 						 reindexer::QueryEntries::const_iterator to, const std::vector<JoinedSelectorMock>& joinedSelectors,
-						 const IndexesData& indexesFields) {
+						 const std::unordered_map<std::string, std::vector<FieldData>>& indexesFields) {
 		bool result = true;
 		for (; it != to; ++it) {
 			OpType op = it->operation;
@@ -249,7 +247,7 @@ private:
 					return checkConditions(item, it.cbegin(), it.cend(), joinedSelectors, indexesFields);
 				},
 				[&](const reindexer::QueryEntry& qe) {
-					if ((op == OpOr && result) || qe.Distinct()) {
+					if ((op == OpOr && result) || qe.distinct) {
 						skip = true;
 						return false;
 					}
@@ -289,7 +287,8 @@ private:
 		return result;
 	}
 
-	static std::string getFieldName(const std::string& indexName, const IndexesData& indexesFields) {
+	static std::string getFieldName(const std::string& indexName,
+									const std::unordered_map<std::string, std::vector<FieldData>>& indexesFields) {
 		if (const auto it = indexesFields.find(indexName); it == indexesFields.end()) {
 			return indexName;
 		} else {
@@ -301,15 +300,15 @@ private:
 
 	static bool checkDistincts(reindexer::Item& item, const reindexer::Query& qr,
 							   std::unordered_map<std::string, std::unordered_set<std::string>>& distincts,
-							   const IndexesData& indexesFields) {
+							   const std::unordered_map<std::string, std::vector<FieldData>>& indexesFields) {
 		bool result = true;
 		// check only on root level
 		for (auto it = qr.entries.cbegin(); it != qr.entries.cend(); ++it) {
 			if (!it->HoldsOrReferTo<reindexer::QueryEntry>()) continue;
 			const reindexer::QueryEntry& qentry = it->Value<reindexer::QueryEntry>();
-			if (!qentry.Distinct()) continue;
+			if (!qentry.distinct) continue;
 
-			const std::string fieldName = getFieldName(qentry.FieldName(), indexesFields);
+			const std::string fieldName = getFieldName(qentry.index, indexesFields);
 			reindexer::VariantArray fieldValue = item[fieldName];
 			EXPECT_EQ(fieldValue.size(), 1) << "Distinct field's size cannot be > 1";
 			if (fieldValue.empty()) return false;
@@ -317,30 +316,30 @@ private:
 			std::unordered_set<std::string>& values = distincts[fieldName];
 			reindexer::Variant keyValue(fieldValue[0]);
 			bool inserted = values.insert(keyValue.As<std::string>()).second;
-			EXPECT_TRUE(inserted) << "Duplicate distinct item for index: " << keyValue.As<std::string>() << ", " << qentry.FieldName()
-								  << " (" << qentry.IndexNo() << ')';
+			EXPECT_TRUE(inserted) << "Duplicate distinct item for index: " << keyValue.As<std::string>() << ", " << qentry.idxNo;
 			result &= inserted;
 		}
 		return result;
 	}
 
-	bool checkCondition(const reindexer::Item& item, const JoinedSelectorMock& joinedSelector, const IndexesData& leftIndexesFields,
-						const IndexesData& rightIndexesFields) {
+	bool checkCondition(const reindexer::Item& item, const JoinedSelectorMock& joinedSelector,
+						const std::unordered_map<std::string, std::vector<FieldData>>& leftIndexesFields,
+						const std::unordered_map<std::string, std::vector<FieldData>>& rightIndexesFields) {
 		for (auto it : joinedSelector.QueryResults()) {
 			const reindexer::Item& rightItem = it.GetItem(false);
 			bool result = true;
 			const auto& joinEntries{joinedSelector.JoinQuery().joinEntries_};
 			assertrx(!joinEntries.empty());
-			assertrx(joinEntries[0].Operation() != OpOr);
+			assertrx(joinEntries[0].op_ != OpOr);
 			for (const auto& je : joinEntries) {
-				if (je.Operation() == OpOr) {
+				if (je.op_ == OpOr) {
 					if (result) continue;
 				} else if (!result) {
 					break;
 				}
-				const bool curResult = checkOnCondition(item, rightItem, je.LeftFieldName(), je.RightFieldName(), je.Condition(),
-														leftIndexesFields, rightIndexesFields);
-				switch (je.Operation()) {
+				const bool curResult =
+					checkOnCondition(item, rightItem, je.index_, je.joinIndex_, je.condition_, leftIndexesFields, rightIndexesFields);
+				switch (je.op_) {
 					case OpAnd:
 						result = curResult;
 						break;
@@ -360,8 +359,9 @@ private:
 	}
 
 	bool checkOnCondition(const reindexer::Item& leftItem, const reindexer::Item& rightItem, const std::string& leftIndexName,
-						  const std::string& rightIndexName, CondType cond, const IndexesData& leftIndexesFields,
-						  const IndexesData& rightIndexesFields) {
+						  const std::string& rightIndexName, CondType cond,
+						  const std::unordered_map<std::string, std::vector<FieldData>>& leftIndexesFields,
+						  const std::unordered_map<std::string, std::vector<FieldData>>& rightIndexesFields) {
 		const CollateOpts& collate = indexesCollates[leftIndexName];
 		const std::string leftFieldName = getFieldName(leftIndexName, leftIndexesFields);
 		const std::string rightFieldName = getFieldName(rightIndexName, rightIndexesFields);
@@ -375,20 +375,21 @@ private:
 		return false;
 	}
 
-	bool checkCondition(const reindexer::Item& item, const reindexer::QueryEntry& qentry, const IndexesData& indexesFields) {
+	bool checkCondition(const reindexer::Item& item, const reindexer::QueryEntry& qentry,
+						const std::unordered_map<std::string, std::vector<FieldData>>& indexesFields) {
 		EXPECT_GT(item.NumFields(), 0);
-		if (isGeomConditions(qentry.Condition())) {
+		if (isGeomConditions(qentry.condition)) {
 			return checkGeomConditions(item, qentry, indexesFields);
 		}
-		const CollateOpts& collate = indexesCollates[qentry.FieldName()];
+		const CollateOpts& collate = indexesCollates[qentry.index];
 
-		if (isIndexComposite(qentry.FieldName(), indexesFields)) {
-			return checkCompositeCondition(item, qentry, collate, indexesFields);
+		if (isIndexComposite(item, qentry)) {
+			return checkCompositeValues(item, qentry, collate, indexesFields);
 		} else {
 			std::string fieldName;
 			reindexer::KeyValueType fieldType = reindexer::KeyValueType::Undefined{};
-			if (const auto it = indexesFields.find(qentry.FieldName()); it == indexesFields.end()) {
-				fieldName = qentry.FieldName();
+			if (const auto it = indexesFields.find(qentry.index); it == indexesFields.end()) {
+				fieldName = qentry.index;
 			} else {
 				EXPECT_EQ(it->second.size(), 1);
 				assertrx(!it->second.empty());
@@ -396,13 +397,13 @@ private:
 				fieldType = it->second[0].type;
 			}
 			reindexer::VariantArray fieldValues = item[fieldName];
-			switch (qentry.Condition()) {
+			switch (qentry.condition) {
 				case CondEmpty:
 					return fieldValues.size() == 0;
 				case CondAny:
 					return fieldValues.size() > 0;
 				case CondAllSet:
-					return checkAllSet<BetweenFields::No>(fieldValues, qentry.Values(), collate, fieldType);
+					return checkAllSet<BetweenFields::No>(fieldValues, qentry.values, collate, fieldType);
 				case CondEq:
 				case CondLt:
 				case CondLe:
@@ -413,8 +414,7 @@ private:
 				case CondLike:
 				case CondDWithin:
 					for (const reindexer::Variant& fieldValue : fieldValues) {
-						if (compareValue<BetweenFields::No>(fieldValue, qentry.Condition(), qentry.Values(), collate, fieldType))
-							return true;
+						if (compareValue<BetweenFields::No>(fieldValue, qentry.condition, qentry.values, collate, fieldType)) return true;
 					}
 			}
 		}
@@ -424,15 +424,16 @@ private:
 
 	static bool isGeomConditions(CondType cond) noexcept { return cond == CondType::CondDWithin; }
 
-	static bool checkGeomConditions(const reindexer::Item& item, const reindexer::QueryEntry& qentry, const IndexesData& indexesFields) {
-		assertrx(qentry.Values().size() == 2);
-		const reindexer::VariantArray coordinates = item[getFieldName(qentry.FieldName(), indexesFields)];
+	static bool checkGeomConditions(const reindexer::Item& item, const reindexer::QueryEntry& qentry,
+									const std::unordered_map<std::string, std::vector<FieldData>>& indexesFields) {
+		assertrx(qentry.values.size() == 2);
+		const reindexer::VariantArray coordinates = item[getFieldName(qentry.index, indexesFields)];
 		if (coordinates.empty()) return false;
 		assertrx(coordinates.size() == 2);
 		const double x = coordinates[0].As<double>();
 		const double y = coordinates[1].As<double>();
-		if (qentry.Condition() == CondDWithin) {
-			return DWithin(reindexer::Point{x, y}, qentry.Values()[0].As<reindexer::Point>(), qentry.Values()[1].As<double>());
+		if (qentry.condition == CondDWithin) {
+			return DWithin(reindexer::Point{x, y}, qentry.values[0].As<reindexer::Point>(), qentry.values[1].As<double>());
 		} else {
 			assertrx(0);
 			abort();
@@ -447,24 +448,25 @@ private:
 		return kvalues;
 	}
 
-	static const std::vector<FieldData>& getCompositeFields(const std::string& indexName, const IndexesData& indexesFields) {
+	static std::vector<FieldData> getCompositeFields(const std::string& indexName,
+													 const std::unordered_map<std::string, std::vector<FieldData>>& indexesFields) {
 		const auto it = indexesFields.find(indexName);
 		assert(it != indexesFields.end());
 		return it->second;
 	}
 
-	static bool checkCompositeCondition(const reindexer::Item& item, const reindexer::QueryEntry& qentry, const CollateOpts& opts,
-										const IndexesData& indexesFields) {
-		const auto fields = getCompositeFields(qentry.FieldName(), indexesFields);
+	static bool checkCompositeValues(const reindexer::Item& item, const reindexer::QueryEntry& qentry, const CollateOpts& opts,
+									 const std::unordered_map<std::string, std::vector<FieldData>>& indexesFields) {
+		const auto fields = getCompositeFields(qentry.index, indexesFields);
 
 		const reindexer::VariantArray& indexesValues = getValues(item, fields);
-		const reindexer::VariantArray& keyValues = qentry.Values();
+		const reindexer::VariantArray& keyValues = qentry.values;
 
-		switch (qentry.Condition()) {
+		switch (qentry.condition) {
 			case CondEmpty:
-				return indexesValues.empty();
+				return indexesValues.size() == 0;
 			case CondAny:
-				return !indexesValues.empty();
+				return indexesValues.size() > 0;
 			case CondGe:
 				assert(!keyValues.empty());
 				return compareCompositeValues(indexesValues, keyValues[0], opts) >= 0;
@@ -488,10 +490,10 @@ private:
 				}
 				return false;
 			case CondAllSet:
-				for (const reindexer::Variant& kv : keyValues) {
+				for (const reindexer::Variant& kv : indexesValues) {
 					if (compareCompositeValues(indexesValues, kv, opts) != 0) return false;
 				}
-				return !keyValues.empty();
+				return !indexesValues.empty();
 			case CondLike:
 			case CondDWithin:
 			default:
@@ -638,42 +640,51 @@ private:
 	}
 
 	bool checkCompositeCondition(const reindexer::Item& item, const reindexer::BetweenFieldsQueryEntry& qentry,
-								 const IndexesData& indexesFields) {
-		const auto& firstFields = getCompositeFields(qentry.LeftFieldName(), indexesFields);
-		const auto& secondFields = getCompositeFields(qentry.RightFieldName(), indexesFields);
+								 const std::unordered_map<std::string, std::vector<FieldData>>& indexesFields) {
+		const auto firstFields = getCompositeFields(qentry.firstIndex, indexesFields);
+		const auto secondFields = getCompositeFields(qentry.secondIndex, indexesFields);
 		assertrx(firstFields.size() == secondFields.size());
 
+		reindexer::BetweenFieldsQueryEntry qe{qentry};
 		for (size_t i = 0; i < firstFields.size(); ++i) {
-			if (!checkCondition(item,
-								reindexer::BetweenFieldsQueryEntry{std::string{firstFields[i].name}, qentry.Condition(),
-																   std::string{secondFields[i].name}},
-								indexesFields))
-				return false;
+			qe.firstIndex = firstFields[i].name;
+			qe.secondIndex = secondFields[i].name;
+			if (!checkCondition(item, qe, indexesFields)) return false;
 		}
 		return !firstFields.empty();
 	}
 
-	static bool isIndexComposite(const std::string& indexName, const IndexesData& indexesFields) {
-		const auto it = indexesFields.find(indexName);
-		return it != indexesFields.end() && it->second.size() > 1;
+	static bool isIndexComposite(const reindexer::BetweenFieldsQueryEntry& qe,
+								 const std::unordered_map<std::string, std::vector<FieldData>>& indexesFields) {
+		if (qe.firstIndex.find('+') != std::string::npos || qe.secondIndex.find('+') != std::string::npos) return true;
+		if (const auto it = indexesFields.find(qe.firstIndex); it != indexesFields.end() && it->second.size() > 1) return true;
+		if (const auto it = indexesFields.find(qe.secondIndex); it != indexesFields.end() && it->second.size() > 1) return true;
+		return false;
 	}
 
-	static bool isIndexComposite(const reindexer::BetweenFieldsQueryEntry& qe, const IndexesData& indexesFields) {
-		return isIndexComposite(qe.LeftFieldName(), indexesFields) || isIndexComposite(qe.RightFieldName(), indexesFields);
+	static bool isIndexComposite(const reindexer::Item& item, const reindexer::QueryEntry& qentry) {
+		if (qentry.values.empty()) return false;
+		if (qentry.idxNo < 0) {
+			return qentry.values.size() && (qentry.values[0].Type().Is<reindexer::KeyValueType::Composite>() ||
+											qentry.values[0].Type().Is<reindexer::KeyValueType::Tuple>());
+		}
+		const auto indexType = item.GetIndexType(qentry.idxNo);
+		return indexType.Is<reindexer::KeyValueType::Composite>() || indexType.Is<reindexer::KeyValueType::Tuple>();
 	}
 
-	bool checkCondition(const reindexer::Item& item, const reindexer::BetweenFieldsQueryEntry& qentry, const IndexesData& indexesFields) {
+	bool checkCondition(const reindexer::Item& item, const reindexer::BetweenFieldsQueryEntry& qentry,
+						const std::unordered_map<std::string, std::vector<FieldData>>& indexesFields) {
 		EXPECT_GT(item.NumFields(), 0);
 		assertrx(!isGeomConditions(qentry.Condition()));
 
-		const CollateOpts& collate = indexesCollates[qentry.LeftFieldName()];
+		const CollateOpts& collate = indexesCollates[qentry.firstIndex];
 
 		if (isIndexComposite(qentry, indexesFields)) {
 			return checkCompositeCondition(item, qentry, indexesFields);
 		}
 
-		const std::string firstField = getFieldName(qentry.LeftFieldName(), indexesFields);
-		const std::string secondField = getFieldName(qentry.RightFieldName(), indexesFields);
+		const std::string firstField = getFieldName(qentry.firstIndex, indexesFields);
+		const std::string secondField = getFieldName(qentry.secondIndex, indexesFields);
 		reindexer::VariantArray lValues = item[firstField];
 		reindexer::VariantArray rValues = item[secondField];
 		switch (qentry.Condition()) {
@@ -800,8 +811,8 @@ private:
 		std::vector<JoinedSelectorMock> result;
 		result.reserve(query.joinQueries_.size());
 		for (auto jq : query.joinQueries_) {
-			jq.Limit(reindexer::QueryEntry::kDefaultLimit);
-			jq.Offset(reindexer::QueryEntry::kDefaultOffset);
+			jq.count = reindexer::QueryEntry::kDefaultLimit;
+			jq.start = reindexer::QueryEntry::kDefaultOffset;
 			jq.sortingEntries_.clear();
 			jq.forcedSortOrder_.clear();
 			result.emplace_back(InnerJoin, std::move(jq));
@@ -904,5 +915,5 @@ private:
 	}
 
 	std::unordered_map<std::string, std::vector<std::string>> ns2pk_;
-	std::unordered_map<std::string, IndexesData> indexesFields_;
+	std::unordered_map<std::string, std::unordered_map<std::string, std::vector<FieldData>>> indexesFields_;
 };

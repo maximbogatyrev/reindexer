@@ -90,11 +90,11 @@ class loop_select_backend : public loop_posix_base {
 public:
 	loop_select_backend();
 	~loop_select_backend();
-	void init(dynamic_loop *owner) noexcept;
-	void set(int fd, int events, int oldevents) noexcept;
-	void stop(int fd) noexcept;
+	void init(dynamic_loop *owner);
+	void set(int fd, int events, int oldevents);
+	void stop(int fd);
 	int runonce(int64_t tv);
-	static int capacity() noexcept;
+	static int capacity();
 
 protected:
 	std::unique_ptr<loop_select_backend_private> private_;
@@ -239,7 +239,6 @@ public:
 	void enable_asyncs() {
 		if (loop_) loop_->backend_.enable_asyncs();
 	}
-	bool is_valid() const noexcept { return loop_; }
 
 protected:
 	template <typename... Args>
@@ -311,6 +310,7 @@ public:
 	void set(dynamic_loop &loop_) noexcept { loop.loop_ = &loop_; }
 	void start(double t, double p = 0) {
 		period_ = p;
+		t_ = t;
 		loop.set(this, t);
 	}
 	void stop() { loop.stop(this); }
@@ -323,6 +323,7 @@ public:
 	void set(std::function<void(timer &, int)> func) noexcept { func_ = std::move(func); }
 
 	bool is_active() const noexcept { return loop.is_active(this); }
+	double last_delay() const noexcept { return t_; }
 	bool has_period() const noexcept { return period_ > 0.00000001; }
 
 	loop_ref loop;
@@ -347,6 +348,7 @@ protected:
 
 	std::function<void(timer &watcher, int t)> func_ = nullptr;
 	double period_ = 0;
+	double t_ = 0;
 	bool in_coro_storage_ = false;
 };
 

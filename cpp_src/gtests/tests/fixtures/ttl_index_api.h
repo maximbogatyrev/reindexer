@@ -11,8 +11,7 @@ public:
 		DefineNamespaceDataset(default_namespace, {IndexDeclaration{kFieldId, "hash", "int", IndexOpts().PK(), 0},
 												   IndexDeclaration{kFieldData, "tree", "int", IndexOpts().Array(), 0},
 												   IndexDeclaration{kFieldData, "tree", "int", IndexOpts().Array(), 0}});
-		err = rt.reindexer->AddIndex(default_namespace, reindexer::IndexDef(kFieldDate, {kFieldDate}, "ttl", "int64", IndexOpts(), 1));
-		ASSERT_TRUE(err.ok()) << err.what();
+		rt.reindexer->AddIndex(default_namespace, reindexer::IndexDef(kFieldDate, {kFieldDate}, "ttl", "int64", IndexOpts(), 1));
 
 		AddDataToNs(3000);
 	}

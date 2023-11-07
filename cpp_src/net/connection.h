@@ -35,8 +35,8 @@ using reindexer::cbuf;
 template <typename Mutex>
 class Connection {
 public:
-	Connection(socket &&s, ev::dynamic_loop &loop, bool enableStat, size_t readBufSize = kConnReadbufSize,
-			   size_t writeBufSize = kConnWriteBufSize, int idleTimeout = -1);
+	Connection(int fd, ev::dynamic_loop &loop, bool enableStat, size_t readBufSize = kConnReadbufSize,
+			   size_t writeBufSize = kConnWriteBufSize);
 	virtual ~Connection();
 
 protected:
@@ -56,41 +56,28 @@ protected:
 	void closeConn();
 	void attach(ev::dynamic_loop &loop);
 	void detach();
-	void restart(socket &&s);
+	void restart(int fd);
 
 	ssize_t async_read();
 
-	socket sock_;
 	ev::io io_;
+	ev::timer timeout_;
 	ev::async async_;
 
+	socket sock_;
 	int curEvents_ = 0;
 	bool closeConn_ = false;
 	bool attached_ = false;
 	bool canWrite_ = true;
-	int64_t rwCounter_ = 0;
-	int64_t lastCheckRWCounter_ = 0;
 
 	chain_buf<Mutex> wrBuf_;
 	cbuf<char> rdBuf_;
 	std::string clientAddr_;
 
 	std::unique_ptr<connection_stats_collector> stats_;
-
-private:
-	void restartIdleCheckTimer() noexcept {
-		lastCheckRWCounter_ = rwCounter_ = 0;
-		if (kIdleCheckPeriod_ > 0) {
-			timeout_.start(kIdleCheckPeriod_, kIdleCheckPeriod_);
-		}
-	}
-
-	ev::timer timeout_;
-	const int kIdleCheckPeriod_;
 };
 
 using ConnectionST = Connection<reindexer::dummy_mutex>;
 using ConnectionMT = Connection<std::mutex>;
-
 }  // namespace net
 }  // namespace reindexer

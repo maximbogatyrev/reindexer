@@ -2,7 +2,7 @@
 
 #include <functional>
 #include <string>
-#include "estl/fast_hash_map.h"
+#include <unordered_map>
 #include "estl/fast_hash_set.h"
 #include "estl/mutex.h"
 #include "estl/shared_mutex.h"
@@ -18,13 +18,7 @@ class JsonBuilder;
 class RdxContext;
 class WrSerializer;
 
-enum ConfigType {
-	ProfilingConf = 0,
-	NamespaceDataConf,
-	ReplicationConf,
-	//
-	kConfigTypesTotalCount
-};
+enum ConfigType { ProfilingConf, NamespaceDataConf, ReplicationConf };
 
 class LongQueriesLoggingParams {
 public:
@@ -71,31 +65,6 @@ public:
 	std::atomic<LongTxLoggingParams> longTxLoggingParams;
 };
 
-constexpr size_t kDefaultCacheSizeLimit = 1024 * 1024 * 128;
-constexpr uint32_t kDefaultHitCountToCache = 2;
-
-struct NamespaceCacheConfigData {
-	bool IsIndexesCacheEqual(const NamespaceCacheConfigData &o) noexcept {
-		return idxIdsetCacheSize == o.idxIdsetCacheSize && idxIdsetHitsToCache == o.idxIdsetHitsToCache &&
-			   ftIdxCacheSize == o.ftIdxCacheSize && ftIdxHitsToCache == o.ftIdxHitsToCache;
-	}
-	bool IsJoinCacheEqual(const NamespaceCacheConfigData &o) noexcept {
-		return joinCacheSize == o.joinCacheSize && joinHitsToCache == o.joinHitsToCache;
-	}
-	bool IsQueryCountCacheEqual(const NamespaceCacheConfigData &o) noexcept {
-		return queryCountCacheSize == o.queryCountCacheSize && queryCountHitsToCache == o.queryCountHitsToCache;
-	}
-
-	uint64_t idxIdsetCacheSize = kDefaultCacheSizeLimit;
-	uint32_t idxIdsetHitsToCache = kDefaultHitCountToCache;
-	uint64_t ftIdxCacheSize = kDefaultCacheSizeLimit;
-	uint32_t ftIdxHitsToCache = kDefaultHitCountToCache;
-	uint64_t joinCacheSize = 2 * kDefaultCacheSizeLimit;
-	uint32_t joinHitsToCache = kDefaultHitCountToCache;
-	uint64_t queryCountCacheSize = kDefaultCacheSizeLimit;
-	uint32_t queryCountHitsToCache = kDefaultHitCountToCache;
-};
-
 struct NamespaceConfigData {
 	bool lazyLoad = false;
 	int noQueryIdleThreshold = 0;
@@ -113,7 +82,6 @@ struct NamespaceConfigData {
 	double maxPreselectPart = 0.1;
 	bool idxUpdatesCountingMode = false;
 	int syncStorageFlushLimit = 20000;
-	NamespaceCacheConfigData cacheConfig;
 };
 
 enum ReplicationRole { ReplicationNone, ReplicationMaster, ReplicationSlave, ReplicationReadOnly };
@@ -165,7 +133,7 @@ public:
 	void setHandler(ConfigType cfgType, std::function<void()> handler);
 
 	ReplicationConfigData GetReplicationConfig();
-	bool GetNamespaceConfig(std::string_view nsName, NamespaceConfigData &data);
+	bool GetNamespaceConfig(const std::string &nsName, NamespaceConfigData &data);
 	LongQueriesLoggingParams GetSelectLoggingParams() const noexcept {
 		return profilingData_.longSelectLoggingParams.load(std::memory_order_relaxed);
 	}
@@ -182,8 +150,8 @@ public:
 private:
 	ProfilingConfigData profilingData_;
 	ReplicationConfigData replicationData_;
-	fast_hash_map<std::string, NamespaceConfigData, hash_str, equal_str, less_str> namespacesData_;
-	std::array<std::function<void()>, kConfigTypesTotalCount> handlers_;
+	std::unordered_map<std::string, NamespaceConfigData> namespacesData_;
+	std::unordered_map<int, std::function<void()>> handlers_;
 	shared_timed_mutex mtx_;
 };
 

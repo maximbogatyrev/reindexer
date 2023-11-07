@@ -6,6 +6,7 @@
 #include "core/transactionimpl.h"
 #include "net/cproto/cproto.h"
 #include "net/cproto/serverconnection.h"
+#include "net/listener.h"
 #include "reindexer_version.h"
 #include "vendor/msgpack/msgpack.h"
 
@@ -13,7 +14,7 @@ namespace reindexer_server {
 using namespace std::string_view_literals;
 
 const reindexer::SemVersion kMinUnknownReplSupportRxVersion("2.6.0");
-constexpr size_t kMaxTxCount = 1024;
+const size_t kMaxTxCount = 1024;
 
 RPCServer::RPCServer(DBManager &dbMgr, LoggerWrapper &logger, IClientsStats *clientsStats, const ServerConfig &scfg,
 					 IStatsWatcher *statsCollector)
@@ -46,8 +47,7 @@ Error RPCServer::Login(cproto::Context &ctx, p_string login, p_string password, 
 		return Error(errParams, "Already logged in");
 	}
 
-	auto clientData = std::make_unique<RPCClientData>();
-	auto &clientDataRef = *clientData;
+	std::unique_ptr<RPCClientData> clientData(new RPCClientData);
 
 	clientData->connID = connCounter.fetch_add(1, std::memory_order_relaxed);
 	clientData->pusher.SetWriter(ctx.writer);
@@ -84,7 +84,6 @@ Error RPCServer::Login(cproto::Context &ctx, p_string login, p_string password, 
 		reindexer::ClientConnectionStat conn;
 		conn.connectionStat = ctx.writer->GetConnectionStat();
 		conn.ip = std::string(ctx.clientAddr);
-		conn.protocol = protocolName_;
 		conn.userName = clientData->auth.Login();
 		conn.dbName = clientData->auth.DBName();
 		conn.userRights = std::string(UserRoleName(clientData->auth.UserRights()));
@@ -96,23 +95,23 @@ Error RPCServer::Login(cproto::Context &ctx, p_string login, p_string password, 
 	}
 
 	ctx.SetClientData(std::move(clientData));
+	if (statsWatcher_) {
+		statsWatcher_->OnClientConnected(dbName, statsSourceName());
+	}
+	int64_t startTs = std::chrono::duration_cast<std::chrono::seconds>(startTs_.time_since_epoch()).count();
+	static std::string_view version = REINDEX_VERSION;
 
 	status = db.length() ? OpenDatabase(ctx, db, createDBIfMissing) : errOK;
 	if (status.ok()) {
-		const int64_t startTs = std::chrono::duration_cast<std::chrono::seconds>(startTs_.time_since_epoch()).count();
-		constexpr std::string_view version = REINDEX_VERSION;
 		ctx.Return({cproto::Arg(p_string(&version)), cproto::Arg(startTs)}, status);
-	}
-	if (statsWatcher_) {
-		statsWatcher_->OnClientConnected(clientDataRef.auth.DBName(), statsSourceName(), protocolName_);
 	}
 
 	return status;
 }
 
-static RPCClientData *getClientDataUnsafe(cproto::Context &ctx) noexcept { return dynamic_cast<RPCClientData *>(ctx.GetClientData()); }
+static RPCClientData *getClientDataUnsafe(cproto::Context &ctx) { return dynamic_cast<RPCClientData *>(ctx.GetClientData()); }
 
-static RPCClientData *getClientDataSafe(cproto::Context &ctx) noexcept {
+static RPCClientData *getClientDataSafe(cproto::Context &ctx) {
 	auto ret = dynamic_cast<RPCClientData *>(ctx.GetClientData());
 	if rx_unlikely (!ret) std::abort();	 // It has to be set by the middleware
 	return ret;
@@ -131,8 +130,9 @@ Error RPCServer::OpenDatabase(cproto::Context &ctx, p_string db, std::optional<b
 }
 
 Error RPCServer::CloseDatabase(cproto::Context &ctx) {
-	getClientDataSafe(ctx)->auth.ResetDB();
-	return {};
+	auto clientData = getClientDataSafe(ctx);
+	clientData->auth.ResetDB();
+	return errOK;
 }
 Error RPCServer::DropDatabase(cproto::Context &ctx) {
 	auto clientData = getClientDataSafe(ctx);
@@ -149,14 +149,14 @@ Error RPCServer::CheckAuth(cproto::Context &ctx) {
 	auto clientData = dynamic_cast<RPCClientData *>(ptr);
 
 	if (ctx.call->cmd == cproto::kCmdLogin || ctx.call->cmd == cproto::kCmdPing) {
-		return {};
+		return errOK;
 	}
 
 	if (!clientData) {
 		return Error(errForbidden, "You should login");
 	}
 
-	return {};
+	return errOK;
 }
 
 void RPCServer::OnClose(cproto::Context &ctx, const Error &err) {
@@ -166,7 +166,7 @@ void RPCServer::OnClose(cproto::Context &ctx, const Error &err) {
 	auto clientData = getClientDataUnsafe(ctx);
 	if (clientData) {
 		if (statsWatcher_) {
-			statsWatcher_->OnClientDisconnected(clientData->auth.DBName(), statsSourceName(), protocolName_);
+			statsWatcher_->OnClientDisconnected(clientData->auth.DBName(), statsSourceName());
 		}
 		if (clientsStats_) {
 			clientsStats_->DeleteConnection(clientData->connID);
@@ -186,12 +186,11 @@ void RPCServer::OnClose(cproto::Context &ctx, const Error &err) {
 void RPCServer::OnResponse(cproto::Context &ctx) {
 	if (statsWatcher_) {
 		auto clientData = getClientDataUnsafe(ctx);
-		static const std::string kUnknownDbName("<unknown>");
-		const std::string &dbName = (clientData != nullptr) ? clientData->auth.DBName() : kUnknownDbName;
-		statsWatcher_->OnOutputTraffic(dbName, statsSourceName(), protocolName_, ctx.stat.sizeStat.respSizeBytes);
+		auto dbName = (clientData != nullptr) ? clientData->auth.DBName() : "<unknown>";
+		statsWatcher_->OnOutputTraffic(dbName, statsSourceName(), ctx.stat.sizeStat.respSizeBytes);
 		if (ctx.stat.sizeStat.respSizeBytes) {
 			// Don't update stats on responses like "updates push"
-			statsWatcher_->OnInputTraffic(dbName, statsSourceName(), protocolName_, ctx.stat.sizeStat.reqSizeBytes);
+			statsWatcher_->OnInputTraffic(dbName, statsSourceName(), ctx.stat.sizeStat.reqSizeBytes);
 		}
 	}
 }
@@ -208,9 +207,10 @@ Error RPCServer::execSqlQueryByType(std::string_view sqlQuery, QueryResults &res
 			case QueryUpdate:
 				return getDB(ctx, kRoleDataWrite).Update(q, res);
 			case QueryTruncate:
-				return getDB(ctx, kRoleDBAdmin).TruncateNamespace(q.NsName());
+				return getDB(ctx, kRoleDBAdmin).TruncateNamespace(q._namespace);
+			default:
+				return Error(errParams, "unknown query type %d", q.Type());
 		}
-		return Error(errParams, "unknown query type %d", q.Type());
 	} catch (Error &e) {
 		return e;
 	}
@@ -218,9 +218,7 @@ Error RPCServer::execSqlQueryByType(std::string_view sqlQuery, QueryResults &res
 
 void RPCServer::Logger(cproto::Context &ctx, const Error &err, const cproto::Args &ret) {
 	const auto clientData = getClientDataUnsafe(ctx);
-	uint8_t buf[0x500];
-	WrSerializer ser(buf);
-	ser << "p='" << protocolName_ << '\'';
+	WrSerializer ser;
 	if (clientData) {
 		ser << "c='"sv << clientData->connID << "' db='"sv << clientData->auth.Login() << '@' << clientData->auth.DBName() << "' "sv;
 	} else {
@@ -428,7 +426,6 @@ Error RPCServer::CommitTx(cproto::Context &ctx, int64_t txId, std::optional<int>
 
 	Transaction &tr = getTx(ctx, txId);
 	QueryResults qres;
-
 	auto err = db.CommitTransaction(tr, qres);
 	if (err.ok()) {
 		int32_t ptVers = -1;
@@ -957,7 +954,7 @@ Error RPCServer::SubscribeUpdates(cproto::Context &ctx, int flag, std::optional<
 	return ret;
 }
 
-bool RPCServer::Start(const std::string &addr, ev::dynamic_loop &loop, RPCSocketT sockDomain, std::string_view threadingMode) {
+bool RPCServer::Start(const std::string &addr, ev::dynamic_loop &loop) {
 	dispatcher_.Register(cproto::kCmdPing, this, &RPCServer::Ping);
 	dispatcher_.Register(cproto::kCmdLogin, this, &RPCServer::Login);
 	dispatcher_.Register(cproto::kCmdOpenDatabase, this, &RPCServer::OpenDatabase);
@@ -1007,12 +1004,11 @@ bool RPCServer::Start(const std::string &addr, ev::dynamic_loop &loop, RPCSocket
 		dispatcher_.Logger(this, &RPCServer::Logger);
 	}
 
-	protocolName_ = (sockDomain == RPCSocketT::TCP) ? kTcpProtocolName : kUnixProtocolName;
 	auto factory = cproto::ServerConnection::NewFactory(dispatcher_, serverConfig_.EnableConnectionsStats, serverConfig_.MaxUpdatesSize);
-	if (threadingMode == ServerConfig::kDedicatedThreading) {
-		listener_ = std::make_unique<ForkedListener>(loop, std::move(factory));
+	if (serverConfig_.RPCThreadingMode == ServerConfig::kDedicatedThreading) {
+		listener_.reset(new ForkedListener(loop, std::move(factory)));
 	} else {
-		listener_ = std::make_unique<Listener<ListenerType::Mixed>>(loop, std::move(factory));
+		listener_.reset(new Listener<ListenerType::Mixed>(loop, std::move(factory)));
 	}
 
 	assertrx(!qrWatcherThread_.joinable());
@@ -1030,7 +1026,7 @@ bool RPCServer::Start(const std::string &addr, ev::dynamic_loop &loop, RPCSocket
 		qrWatcher_.Stop();
 	});
 
-	return listener_->Bind(addr, (sockDomain == RPCSocketT::TCP) ? socket_domain::tcp : socket_domain::unx);
+	return listener_->Bind(addr);
 }
 
 RPCClientData::~RPCClientData() {

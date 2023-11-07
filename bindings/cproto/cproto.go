@@ -8,8 +8,6 @@ import (
 	"math"
 	"net"
 	"net/url"
-	"runtime"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -29,13 +27,11 @@ const (
 	opWr = 1
 )
 
-var emptyLogger bindings.NullLogger
+var logger Logger
+var logMtx sync.RWMutex
 
 func init() {
 	bindings.RegisterBinding("cproto", new(NetCProto))
-	if runtime.GOOS != "windows" {
-		bindings.RegisterBinding("ucproto", new(NetCProto))
-	}
 }
 
 type Logger interface {
@@ -56,8 +52,6 @@ type NetCProto struct {
 	appName          string
 	termCh           chan struct{}
 	lock             sync.RWMutex
-	logger           Logger
-	logMtx           sync.RWMutex
 }
 
 type dsn struct {
@@ -128,16 +122,6 @@ func (binding *NetCProto) Init(u []url.URL, options ...interface{}) (err error) 
 	}
 
 	binding.dsn.url = u
-	for i := 0; i < len(binding.dsn.url); i++ {
-		if binding.dsn.url[i].Scheme == "ucproto" {
-			addrs := strings.Split(binding.dsn.url[i].Path, ":")
-			if len(addrs) != 2 {
-				return fmt.Errorf("rq: unexpected URL format for ucproto: '%s'. Expecting '<unix socket>:/<db name>", binding.dsn.url[i].Path)
-			}
-			binding.dsn.url[i].Host = addrs[0]
-			binding.dsn.url[i].Path = addrs[1]
-		}
-	}
 	binding.connectDSN(context.Background(), connPoolSize, connPoolLBAlgorithm)
 	binding.termCh = make(chan struct{})
 	go binding.pinger()
@@ -407,26 +391,16 @@ func (binding *NetCProto) OnChangeCallback(f func()) {
 }
 
 func (binding *NetCProto) EnableLogger(log bindings.Logger) {
-	binding.logMtx.Lock()
-	defer binding.logMtx.Unlock()
-	binding.logger = log
+	logMtx.Lock()
+	defer logMtx.Unlock()
+	logger = log
 }
 
 func (binding *NetCProto) DisableLogger() {
-	binding.logMtx.Lock()
-	defer binding.logMtx.Unlock()
-	binding.logger = nil
+	logMtx.Lock()
+	defer logMtx.Unlock()
+	logger = nil
 }
-
-func (binding *NetCProto) GetLogger() bindings.Logger {
-	binding.logMtx.RLock()
-	defer binding.logMtx.RUnlock()
-	if binding.logger != nil {
-		return binding.logger
-	}
-	return &emptyLogger
-}
-
 func (binding *NetCProto) ReopenLogFiles() error {
 	fmt.Println("cproto binding ReopenLogFiles method is dummy")
 	return nil
@@ -491,10 +465,10 @@ func (binding *NetCProto) getAllConns() []*connection {
 }
 
 func (binding *NetCProto) logMsg(level int, fmt string, msg ...interface{}) {
-	binding.logMtx.RLock()
-	defer binding.logMtx.RUnlock()
-	if binding.logger != nil {
-		binding.logger.Printf(level, fmt, msg)
+	logMtx.RLock()
+	defer logMtx.RUnlock()
+	if logger != nil {
+		logger.Printf(level, fmt, msg)
 	}
 }
 

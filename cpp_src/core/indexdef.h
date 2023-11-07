@@ -26,7 +26,9 @@ struct IndexDef {
 	IndexDef(std::string name, JsonPaths jsonPaths, std::string indexType, std::string fieldType, IndexOpts opts, int64_t expireAfter);
 	IndexDef(std::string name, std::string indexType, std::string fieldType, IndexOpts opts);
 	IndexDef(std::string name, JsonPaths jsonPaths, IndexType type, IndexOpts opts);
-	bool IsEqual(const IndexDef &other, IndexComparison cmpType) const;
+	bool operator==(const IndexDef &other) const { return IsEqual(other, false); }
+	bool operator!=(const IndexDef &other) const { return !IsEqual(other, false); }
+	bool IsEqual(const IndexDef &other, bool skipConfig) const;
 	IndexType Type() const;
 	std::string getCollateMode() const;
 	const std::vector<std::string> &Conditions() const;

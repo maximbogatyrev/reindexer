@@ -11,7 +11,7 @@ template <typename T>
 Variant IndexOrdered<T>::Upsert(const Variant &key, IdType id, bool &clearCache) {
 	if (key.Type().Is<KeyValueType::Null>()) {
 		if (this->empty_ids_.Unsorted().Add(id, IdSet::Auto, this->sortedIdxCount_)) {
-			this->cache_.reset();
+			if (this->cache_) this->cache_.reset();
 			clearCache = true;
 			this->isBuilt_ = false;
 		}
@@ -28,7 +28,7 @@ Variant IndexOrdered<T>::Upsert(const Variant &key, IdType id, bool &clearCache)
 
 	if (keyIt->second.Unsorted().Add(id, this->opts_.IsPK() ? IdSet::Ordered : IdSet::Auto, this->sortedIdxCount_)) {
 		this->isBuilt_ = false;
-		this->cache_.reset();
+		if (this->cache_) this->cache_.reset();
 		clearCache = true;
 	}
 	this->tracker_.markUpdated(this->idx_map, keyIt);
@@ -56,6 +56,10 @@ SelectKeyResults IndexOrdered<T>::SelectKey(const VariantArray &keys, CondType c
 		return IndexUnordered<T>::SelectKey(keys, condition, sortId, opts, ctx, rdxCtx);
 	}
 
+	if (keys.size() < 1) {
+		throw Error(errParams, "For condition required at least 1 argument, but provided 0");
+	}
+
 	SelectKeyResult res;
 	auto startIt = this->idx_map.begin();
 	auto endIt = this->idx_map.end();
@@ -77,6 +81,7 @@ SelectKeyResults IndexOrdered<T>::SelectKey(const VariantArray &keys, CondType c
 			if (startIt == this->idx_map.end()) startIt = this->idx_map.upper_bound(static_cast<ref_type>(key1));
 			break;
 		case CondRange: {
+			if (keys.size() != 2) throw Error(errParams, "For ranged query reuqired 2 arguments, but provided %d", keys.size());
 			const auto &key2 = keys[1];
 
 			startIt = this->idx_map.find(static_cast<ref_type>(key1));
@@ -202,20 +207,18 @@ IndexIterator::Ptr IndexOrdered<T>::CreateIterator() const {
 }
 
 template <typename KeyEntryT>
-static std::unique_ptr<Index> IndexOrdered_New(const IndexDef &idef, PayloadType &&payloadType, FieldsSet &&fields,
-											   const NamespaceCacheConfigData &cacheCfg) {
+static std::unique_ptr<Index> IndexOrdered_New(const IndexDef &idef, PayloadType payloadType, const FieldsSet &fields) {
 	switch (idef.Type()) {
 		case IndexIntBTree:
-			return std::make_unique<IndexOrdered<number_map<int, KeyEntryT>>>(idef, std::move(payloadType), std::move(fields), cacheCfg);
+			return std::unique_ptr<Index>{new IndexOrdered<number_map<int, KeyEntryT>>(idef, std::move(payloadType), fields)};
 		case IndexInt64BTree:
-			return std::make_unique<IndexOrdered<number_map<int64_t, KeyEntryT>>>(idef, std::move(payloadType), std::move(fields),
-																				  cacheCfg);
+			return std::unique_ptr<Index>{new IndexOrdered<number_map<int64_t, KeyEntryT>>(idef, std::move(payloadType), fields)};
 		case IndexStrBTree:
-			return std::make_unique<IndexOrdered<str_map<KeyEntryT>>>(idef, std::move(payloadType), std::move(fields), cacheCfg);
+			return std::unique_ptr<Index>{new IndexOrdered<str_map<KeyEntryT>>(idef, std::move(payloadType), fields)};
 		case IndexDoubleBTree:
-			return std::make_unique<IndexOrdered<number_map<double, KeyEntryT>>>(idef, std::move(payloadType), std::move(fields), cacheCfg);
+			return std::unique_ptr<Index>{new IndexOrdered<number_map<double, KeyEntryT>>(idef, std::move(payloadType), fields)};
 		case IndexCompositeBTree:
-			return std::make_unique<IndexOrdered<payload_map<KeyEntryT, true>>>(idef, std::move(payloadType), std::move(fields), cacheCfg);
+			return std::unique_ptr<Index>{new IndexOrdered<payload_map<KeyEntryT, true>>(idef, std::move(payloadType), fields)};
 		case IndexStrHash:
 		case IndexIntHash:
 		case IndexInt64Hash:
@@ -239,11 +242,9 @@ static std::unique_ptr<Index> IndexOrdered_New(const IndexDef &idef, PayloadType
 }
 
 // NOLINTBEGIN(*cplusplus.NewDeleteLeaks)
-std::unique_ptr<Index> IndexOrdered_New(const IndexDef &idef, PayloadType &&payloadType, FieldsSet &&fields,
-										const NamespaceCacheConfigData &cacheCfg) {
-	return (idef.opts_.IsPK() || idef.opts_.IsDense())
-			   ? IndexOrdered_New<Index::KeyEntryPlain>(idef, std::move(payloadType), std::move(fields), cacheCfg)
-			   : IndexOrdered_New<Index::KeyEntry>(idef, std::move(payloadType), std::move(fields), cacheCfg);
+std::unique_ptr<Index> IndexOrdered_New(const IndexDef &idef, PayloadType payloadType, const FieldsSet &fields) {
+	return (idef.opts_.IsPK() || idef.opts_.IsDense()) ? IndexOrdered_New<Index::KeyEntryPlain>(idef, std::move(payloadType), fields)
+													   : IndexOrdered_New<Index::KeyEntry>(idef, std::move(payloadType), fields);
 }
 // NOLINTEND(*cplusplus.NewDeleteLeaks)
 

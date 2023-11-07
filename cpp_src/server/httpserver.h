@@ -18,7 +18,7 @@ struct IStatsWatcher;
 
 using namespace reindexer::net;
 
-struct HTTPClientData final : public http::ClientData {
+struct HTTPClientData : public http::ClientData {
 	AuthContext auth;
 };
 
@@ -108,8 +108,7 @@ protected:
 	unsigned prepareOffset(std::string_view offsetParam, int offsetDefault = kDefaultOffset);
 	int modifyQueryTxImpl(http::Context &ctx, const std::string &dbName, std::string_view txId, Query &q);
 
-	template <UserRole role>
-	Reindexer getDB(http::Context &ctx, std::string *dbNameOut = nullptr);
+	Reindexer getDB(http::Context &ctx, UserRole role, std::string *dbNameOut = nullptr);
 	std::string getNameFromJson(std::string_view json);
 	constexpr static std::string_view statsSourceName() { return std::string_view{"http"}; }
 

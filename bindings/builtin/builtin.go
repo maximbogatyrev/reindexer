@@ -31,15 +31,8 @@ type Logger interface {
 	Printf(level int, fmt string, msg ...interface{})
 }
 
-// Separate mutexes for logger object itself and for reindexer_enable_logger call:
-// logMtx provides safe access to the logger
-// logEnableMtx provides atomic logic for (enable + set) and (disable + reset) procedures
-// This logger is global to easily export it into CGO (however it may lead to some confusion if there are multiple builtin instances in the app)
-var logMtx sync.RWMutex
-var logEnableMtx sync.Mutex
 var logger Logger
-var emptyLogger bindings.NullLogger
-
+var logMtx sync.RWMutex
 var enableDebug bool
 
 var bufPool sync.Pool
@@ -607,33 +600,18 @@ func CGoLogger(level int, msg string) {
 	}
 }
 
-func (binding *Builtin) setLogger(log bindings.Logger) {
+func (binding *Builtin) EnableLogger(log bindings.Logger) {
 	logMtx.Lock()
 	defer logMtx.Unlock()
 	logger = log
-}
-
-func (binding *Builtin) EnableLogger(log bindings.Logger) {
-	logEnableMtx.Lock()
-	defer logEnableMtx.Unlock()
-	binding.setLogger(log)
 	C.reindexer_enable_go_logger()
 }
 
 func (binding *Builtin) DisableLogger() {
-	logEnableMtx.Lock()
-	defer logEnableMtx.Unlock()
+	logMtx.Lock()
+	defer logMtx.Unlock()
 	C.reindexer_disable_go_logger()
-	binding.setLogger(nil)
-}
-
-func (binding *Builtin) GetLogger() bindings.Logger {
-	logMtx.RLock()
-	defer logMtx.RUnlock()
-	if logger != nil {
-		return logger
-	}
-	return &emptyLogger
+	logger = nil
 }
 
 func (binding *Builtin) ReopenLogFiles() error {

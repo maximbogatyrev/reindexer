@@ -9,11 +9,7 @@
 namespace reindexer {
 
 template <typename T>
-IndexText<T>::IndexText(const IndexText<T> &other)
-	: IndexUnordered<T>(other),
-	  cache_ft_(std::make_unique<FtIdSetCache>(other.cacheMaxSize_, other.hitsToCache_)),
-	  cacheMaxSize_(other.cacheMaxSize_),
-	  hitsToCache_(other.hitsToCache_) {
+IndexText<T>::IndexText(const IndexText<T> &other) : IndexUnordered<T>(other), cache_ft_(std::make_shared<FtIdSetCache>()) {
 	initSearchers();
 }
 // Generic implemetation for string index
@@ -23,17 +19,16 @@ void IndexText<T>::initSearchers() {
 	size_t jsonPathIdx = 0;
 
 	if (this->payloadType_) {
-		const auto &fields = this->Fields();
-		for (unsigned i = 0, s = fields.size(); i < s; i++) {
-			auto fieldIdx = fields[i];
+		for (unsigned i = 0; i < this->fields_.size(); i++) {
+			auto fieldIdx = this->fields_[i];
 			if (fieldIdx == IndexValueType::SetByJsonPath) {
-				assertrx(jsonPathIdx < fields.getJsonPathsLength());
-				ftFields_.emplace(fields.getJsonPath(jsonPathIdx++), i);
+				assertrx(jsonPathIdx < this->fields_.getJsonPathsLength());
+				ftFields_.emplace(this->fields_.getJsonPath(jsonPathIdx++), i);
 			} else {
 				ftFields_.emplace(this->payloadType_->Field(fieldIdx).Name(), i);
 			}
 		}
-		if rx_unlikely (ftFields_.size() != fields.size()) {
+		if rx_unlikely (ftFields_.size() != this->fields_.size()) {
 			throw Error(errParams, "Composite fulltext index '%s' contains duplicated fields", this->name_);
 		}
 		if rx_unlikely (ftFields_.size() > kMaxFtCompositeFields) {
@@ -58,18 +53,6 @@ void IndexText<T>::SetOpts(const IndexOpts &opts) {
 			throw;
 		}
 	}
-}
-
-template <typename T>
-void IndexText<T>::ReconfigureCache(const NamespaceCacheConfigData &cacheCfg) {
-	if (cacheMaxSize_ != cacheCfg.ftIdxCacheSize || hitsToCache_ != cacheCfg.ftIdxHitsToCache) {
-		cacheMaxSize_ = cacheCfg.ftIdxCacheSize;
-		hitsToCache_ = cacheCfg.ftIdxHitsToCache;
-		if (cache_ft_) {
-			cache_ft_ = std::make_unique<FtIdSetCache>(cacheMaxSize_, hitsToCache_);
-		}
-	}
-	Base::ReconfigureCache(cacheCfg);
 }
 
 template <typename T>
@@ -195,7 +178,7 @@ SelectKeyResults IndexText<T>::SelectKey(const VariantArray &keys, CondType cond
 
 template <typename T>
 FieldsGetter IndexText<T>::Getter() {
-	return FieldsGetter(this->Fields(), this->payloadType_, this->KeyType());
+	return FieldsGetter(this->fields_, this->payloadType_, this->KeyType());
 }
 
 template class IndexText<unordered_str_map<FtKeyEntry>>;

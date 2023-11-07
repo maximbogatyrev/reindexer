@@ -10,7 +10,6 @@
 #include "itoa/itoa.h"
 #include "tools/assertrx.h"
 #include "tools/customlocal.h"
-#include "tools/randomgenerator.h"
 #include "tools/stringstools.h"
 #include "utf8cpp/utf8.h"
 
@@ -148,7 +147,7 @@ bool is_number(std::string_view str) {
 }
 
 void split(std::string_view str, std::string &buf, std::vector<const char *> &words, const std::string &extraWordSymbols) {
-	// assuming that the 'ToLower' function and the 'check for replacement' function should not change the character size in bytes
+	//assuming that the 'ToLower' function and the 'check for replacement' function should not change the character size in bytes
 	buf.resize(str.length());
 	words.resize(0);
 	auto bufIt = buf.begin();
@@ -186,29 +185,29 @@ Pos wordToByteAndCharPos(std::string_view str, int wordPosition, const std::stri
 	auto wordEndIt = str.begin();
 	auto it = str.begin();
 	Pos wp;
-	const bool constexpr needChar = std::is_same_v<Pos, WordPositionEx>;
-	if constexpr (needChar) {
+	const bool constexpr neadChar = std::is_same_v<Pos, WordPositionEx>;
+	if constexpr (neadChar) {
 		wp.start.ch = -1;
 	}
 	for (; it != str.end();) {
 		auto ch = utf8::unchecked::next(it);
-		if constexpr (needChar) {
+		if constexpr (neadChar) {
 			wp.start.ch++;
 		}
 		// skip not word symbols
 		while (it != str.end() && extraWordSymbols.find(ch) == std::string::npos && !IsAlpha(ch) && !IsDigit(ch)) {
 			wordStartIt = it;
 			ch = utf8::unchecked::next(it);
-			if constexpr (needChar) {
+			if constexpr (neadChar) {
 				wp.start.ch++;
 			}
 		}
-		if constexpr (needChar) {
+		if constexpr (neadChar) {
 			wp.end.ch = wp.start.ch;
 		}
 		while (IsAlpha(ch) || IsDigit(ch) || extraWordSymbols.find(ch) != std::string::npos) {
 			wordEndIt = it;
-			if constexpr (needChar) {
+			if constexpr (neadChar) {
 				wp.end.ch++;
 			}
 			if (it == str.end()) {
@@ -225,7 +224,7 @@ Pos wordToByteAndCharPos(std::string_view str, int wordPosition, const std::stri
 				wordStartIt = it;
 			}
 		}
-		if constexpr (needChar) {
+		if constexpr (neadChar) {
 			wp.start.ch = wp.end.ch;
 		}
 	}
@@ -610,37 +609,24 @@ int getUTF8StringCharactersCount(std::string_view str) noexcept {
 
 int stoi(std::string_view sl) {
 	bool valid;
-	const int res = jsteemann::atoi<int>(sl.data(), sl.data() + sl.size(), valid);
-	if (!valid) {
-		throw Error(errParams, "Can't convert '%s' to number", sl);
-	}
-	return res;
-}
-
-std::optional<int> try_stoi(std::string_view sl) {
-	bool valid;
-	const int res = jsteemann::atoi<int>(sl.data(), sl.data() + sl.size(), valid);
-	if (!valid) {
-		return std::nullopt;
-	}
-	return res;
+	return jsteemann::atoi<int>(sl.data(), sl.data() + sl.size(), valid);
 }
 
 int64_t stoll(std::string_view sl) {
 	bool valid;
 	auto ret = jsteemann::atoi<int64_t>(sl.data(), sl.data() + sl.size(), valid);
 	if (!valid) {
-		throw Error(errParams, "Can't convert '%s' to number", sl);
+		throw Error(errParams, "Can't convert %s to number", sl);
 	}
 	return ret;
 }
 
 std::string randStringAlph(size_t len) {
-	constexpr std::string_view symbols = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+	static const std::string symbols = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 	std::string result;
 	result.reserve(len);
 	while (result.size() < len) {
-		const size_t f = tools::RandomGenerator::getu32(0, symbols.size() - 1);
+		const size_t f = rand() % symbols.size();
 		result += symbols[f];
 	}
 	return result;

@@ -7,8 +7,8 @@
 namespace reindexer {
 
 template <>
-IndexStore<Point>::IndexStore(const IndexDef &idef, PayloadType &&payloadType, FieldsSet &&fields)
-	: Index(idef, std::move(payloadType), std::move(fields)) {
+IndexStore<Point>::IndexStore(const IndexDef &idef, PayloadType payloadType, const FieldsSet &fields)
+	: Index(idef, std::move(payloadType), fields) {
 	keyType_ = selectKeyType_ = KeyValueType::Double{};
 	opts_.Array(true);
 }
@@ -68,8 +68,8 @@ Variant IndexStore<PayloadValue>::Upsert(const Variant &key, IdType /*id*/, bool
 
 template <typename T>
 Variant IndexStore<T>::Upsert(const Variant &key, IdType id, bool & /*clearCache*/) {
-	if (!opts_.IsArray() && !opts_.IsDense() && !opts_.IsSparse() && !key.Type().Is<KeyValueType::Null>()) {
-		idx_data.resize(std::max(id + 1, IdType(idx_data.size())));
+	if (!opts_.IsArray() && !opts_.IsDense() && !opts_.IsSparse() && key.Type().Is<KeyValueType::Null>()) {
+		idx_data.resize(std::max(id + 1, int(idx_data.size())));
 		idx_data[id] = static_cast<T>(key);
 	}
 	return Variant(key);
@@ -106,8 +106,43 @@ SelectKeyResults IndexStore<T>::SelectKey(const VariantArray &keys, CondType con
 	if (condition == CondAny && !this->opts_.IsArray() && !this->opts_.IsSparse() && !sopts.distinct)
 		throw Error(errParams, "The 'NOT NULL' condition is suported only by 'sparse' or 'array' indexes");
 
-	res.comparators_.emplace_back(condition, KeyType(), keys, opts_.IsArray(), bool(sopts.distinct), payloadType_, Fields(),
-								  idx_data.size() ? idx_data.data() : nullptr, opts_.collateOpts_);
+	// TODO: it may be necessary to remove or change this switch after QueryEntry refactoring
+	switch (condition) {
+		case CondAny:
+			if (!this->opts_.IsArray() && !this->opts_.IsSparse() && !sopts.distinct) {
+				throw Error(errParams, "The 'NOT NULL' condition is suported only by 'sparse' or 'array' indexes");
+			}
+			break;
+		case CondEmpty:
+			if (!this->opts_.IsArray() && !this->opts_.IsSparse()) {
+				throw Error(errParams, "The 'is NULL' condition is suported only by 'sparse' or 'array' indexes");
+			}
+			break;
+		case CondAllSet:
+		case CondSet:
+		case CondEq:
+			break;
+		case CondRange:
+		case CondDWithin:
+			if (keys.size() != 2) {
+				throw Error(errParams, "For condition %s required exactly 2 arguments, but provided %d", CondTypeToStr(condition),
+							keys.size());
+			}
+			break;
+		case CondLt:
+		case CondLe:
+		case CondGt:
+		case CondGe:
+		case CondLike:
+			if (keys.size() != 1) {
+				throw Error(errParams, "For condition %s required exactly 1 argument, but provided %d", CondTypeToStr(condition),
+							keys.size());
+			}
+			break;
+	}
+
+	res.comparators_.push_back(Comparator(condition, KeyType(), keys, opts_.IsArray(), sopts.distinct, payloadType_, fields_,
+										  idx_data.size() ? idx_data.data() : nullptr, opts_.collateOpts_));
 	return SelectKeyResults(std::move(res));
 }
 
@@ -148,20 +183,20 @@ void IndexStore<T>::AddDestroyTask(tsl::detail_sparse_hash::ThreadTaskQueue &q) 
 	(void)q;
 }
 
-std::unique_ptr<Index> IndexStore_New(const IndexDef &idef, PayloadType &&payloadType, FieldsSet &&fields) {
+std::unique_ptr<Index> IndexStore_New(const IndexDef &idef, PayloadType payloadType, const FieldsSet &fields) {
 	switch (idef.Type()) {
 		case IndexBool:
-			return std::make_unique<IndexStore<bool>>(idef, std::move(payloadType), std::move(fields));
+			return std::unique_ptr<Index>{new IndexStore<bool>(idef, std::move(payloadType), fields)};
 		case IndexIntStore:
-			return std::make_unique<IndexStore<int>>(idef, std::move(payloadType), std::move(fields));
+			return std::unique_ptr<Index>{new IndexStore<int>(idef, std::move(payloadType), fields)};
 		case IndexInt64Store:
-			return std::make_unique<IndexStore<int64_t>>(idef, std::move(payloadType), std::move(fields));
+			return std::unique_ptr<Index>{new IndexStore<int64_t>(idef, std::move(payloadType), fields)};
 		case IndexDoubleStore:
-			return std::make_unique<IndexStore<double>>(idef, std::move(payloadType), std::move(fields));
+			return std::unique_ptr<Index>{new IndexStore<double>(idef, std::move(payloadType), fields)};
 		case IndexStrStore:
-			return std::make_unique<IndexStore<key_string>>(idef, std::move(payloadType), std::move(fields));
+			return std::unique_ptr<Index>{new IndexStore<key_string>(idef, std::move(payloadType), fields)};
 		case IndexUuidStore:
-			return std::make_unique<IndexStore<Uuid>>(idef, std::move(payloadType), std::move(fields));
+			return std::unique_ptr<Index>{new IndexStore<Uuid>(idef, std::move(payloadType), fields)};
 		case IndexStrHash:
 		case IndexStrBTree:
 		case IndexIntBTree:

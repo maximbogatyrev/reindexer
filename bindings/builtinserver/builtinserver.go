@@ -249,10 +249,6 @@ func (server *BuiltinServer) DisableLogger() {
 	server.builtin.DisableLogger()
 }
 
-func (server *BuiltinServer) GetLogger() bindings.Logger {
-	return server.builtin.GetLogger()
-}
-
 func (server *BuiltinServer) ReopenLogFiles() error {
 	return err2go(C.reopen_log_files(server.svc))
 }

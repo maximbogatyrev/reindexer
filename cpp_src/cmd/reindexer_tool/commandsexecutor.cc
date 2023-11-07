@@ -47,18 +47,19 @@ Error CommandsExecutor<reindexer::client::CoroReindexer>::Run(const std::string&
 }
 
 template <typename DBInterface>
-Error CommandsExecutor<DBInterface>::GetSuggestions(const std::string& input, std::vector<std::string>& suggestions) {
+void CommandsExecutor<DBInterface>::GetSuggestions(const std::string& input, std::vector<std::string>& suggestions) {
 	OutParamCommand<std::vector<std::string>> cmd(
-		[this, &input](std::vector<std::string>& suggestions) { return getSuggestions(input, suggestions); }, suggestions);
-	return execCommand(cmd);
+		[this, &input](std::vector<std::string>& suggestions) {
+			getSuggestions(input, suggestions);
+			return errOK;
+		},
+		suggestions);
+	execCommand(cmd);
 }
 
 template <typename DBInterface>
 Error CommandsExecutor<DBInterface>::Stop() {
-	GenericCommand cmd([this] {
-		stop(true);
-		return Error{};
-	});
+	GenericCommand cmd([this] { return stop(true); });
 	auto err = execCommand(cmd);
 	if (err.ok() && executorThr_.joinable()) {
 		executorThr_.join();
@@ -276,26 +277,11 @@ Error CommandsExecutor<DBInterface>::runImpl(const std::string& dsn, Args&&... a
 
 template <typename DBInterface>
 std::string CommandsExecutor<DBInterface>::getCurrentDsn(bool withPath) const {
-	using namespace std::string_view_literals;
 	std::string dsn(uri_.scheme() + "://");
 	if (!uri_.password().empty() && !uri_.username().empty()) {
-		dsn += uri_.username() + ':' + uri_.password() + '@';
+		dsn += uri_.username() + ":" + uri_.password() + "@";
 	}
-	if (uri_.scheme() == "ucproto"sv) {
-		std::vector<std::string_view> pathParts;
-		reindexer::split(std::string_view(uri_.path()), ":", true, pathParts);
-		std::string_view dbName;
-		if (pathParts.size() >= 2) {
-			dbName = pathParts.back();
-		}
-		if (dbName.size()) {
-			dsn += uri_.path().substr(0, uri_.path().size() - dbName.size() - 1) + ':' + (withPath ? uri_.path() : "/");
-		} else {
-			dsn += uri_.path() + ':' + (withPath ? uri_.path() : "/");
-		}
-	} else {
-		dsn += uri_.hostname() + ':' + uri_.port() + (withPath ? uri_.path() : "/");
-	}
+	dsn += uri_.hostname() + ":" + uri_.port() + (withPath ? uri_.path() : "/");
 	return dsn;
 }
 
@@ -489,14 +475,15 @@ Error CommandsExecutor<DBInterface>::processImpl(const std::string& command) noe
 }
 
 template <>
-void CommandsExecutor<reindexer::Reindexer>::stop(bool terminate) {
+Error CommandsExecutor<reindexer::Reindexer>::stop(bool terminate) {
 	if (terminate) {
 		stopCh_.close();
 	}
+	return Error();
 }
 
 template <>
-void CommandsExecutor<reindexer::client::CoroReindexer>::stop(bool terminate) {
+Error CommandsExecutor<reindexer::client::CoroReindexer>::stop(bool terminate) {
 	if (terminate) {
 		stopCh_.close();
 	}
@@ -504,17 +491,11 @@ void CommandsExecutor<reindexer::client::CoroReindexer>::stop(bool terminate) {
 }
 
 template <typename DBInterface>
-Error CommandsExecutor<DBInterface>::getSuggestions(const std::string& input, std::vector<std::string>& suggestions) {
-	if (!input.empty() && input[0] != '\\') {
-		auto err = db().GetSqlSuggestions(input, input.length() - 1, suggestions);
-		if (!err.ok()) {
-			return err;
-		}
-	}
+void CommandsExecutor<DBInterface>::getSuggestions(const std::string& input, std::vector<std::string>& suggestions) {
+	if (!input.empty() && input[0] != '\\') db().GetSqlSuggestions(input, input.length() - 1, suggestions);
 	if (suggestions.empty()) {
 		addCommandsSuggestions(input, suggestions);
 	}
-	return {};
 }
 
 template <typename DBInterface>
@@ -780,8 +761,7 @@ Error CommandsExecutor<DBInterface>::commandDump(const std::string& command) {
 				return Error(errCanceled, "Canceled");
 			}
 			wrser << "\\UPSERT " << reindexer::escapeString(nsDef.name) << ' ';
-			err = it.GetJSON(wrser, false);
-			if (!err.ok()) return err;
+			it.GetJSON(wrser, false);
 			wrser << '\n';
 			if (wrser.Len() > 0x100000) {
 				output_() << wrser.Slice();
@@ -867,11 +847,9 @@ Error CommandsExecutor<DBInterface>::commandMeta(const std::string& command) {
 		auto nsName = reindexer::unescapeString(parser.NextToken());
 		std::vector<std::string> allMeta;
 		auto err = db().EnumMeta(nsName, allMeta);
-		if (!err.ok()) return err;
 		for (auto& metaKey : allMeta) {
 			std::string metaData;
-			err = db().GetMeta(nsName, metaKey, metaData);
-			if (!err.ok()) return err;
+			db().GetMeta(nsName, metaKey, metaData);
 			output_() << metaKey << " = " << metaData << std::endl;
 		}
 		return err;
@@ -939,18 +917,15 @@ Error CommandsExecutor<DBInterface>::commandBench(const std::string& command) {
 	LineParser parser(command);
 	parser.NextToken();
 
-	const std::string_view benchTimeToken = parser.NextToken();
-	const int benchTime = benchTimeToken.empty() ? kBenchDefaultTime : reindexer::stoi(benchTimeToken);
+	int benchTime = reindexer::stoi(parser.NextToken());
+	if (benchTime == 0) benchTime = kBenchDefaultTime;
 
-	auto err = db().DropNamespace(kBenchNamespace);
-	if (!err.ok() && err.code() != errNotFound) {
-		return err;
-	}
+	db().DropNamespace(kBenchNamespace);
 
 	NamespaceDef nsDef(kBenchNamespace);
 	nsDef.AddIndex("id", "hash", "int", IndexOpts().PK());
 
-	err = db().AddNamespace(nsDef);
+	auto err = db().AddNamespace(nsDef);
 	if (!err.ok()) return err;
 
 	output_() << "Seeding " << kBenchItemsCount << " documents to bench namespace..." << std::endl;
@@ -1027,30 +1002,31 @@ Error CommandsExecutor<DBInterface>::commandSubscribe(const std::string& command
 
 template <>
 Error CommandsExecutor<reindexer::client::CoroReindexer>::commandProcessDatabases(const std::string& command) {
-	using namespace std::string_view_literals;
 	LineParser parser(command);
 	parser.NextToken();
 	std::string_view subCommand = parser.NextToken();
-	assertrx(uri_.scheme() == "cproto"sv || uri_.scheme() == "ucproto"sv);
-	if (subCommand == "list"sv) {
+	assertrx(uri_.scheme() == "cproto");
+	if (subCommand == "list") {
 		std::vector<std::string> dbList;
 		Error err = getAvailableDatabases(dbList);
 		if (!err.ok()) return err;
 		for (const std::string& dbName : dbList) output_() << dbName << std::endl;
 		return Error();
-	} else if (subCommand == "use"sv) {
+	} else if (subCommand == "use") {
 		std::string currentDsn = getCurrentDsn() + std::string(parser.NextToken());
-		stop(false);
-		auto err = db().Connect(currentDsn, loop_);
+		Error err = stop(false);
+		if (!err.ok()) return err;
+		err = db().Connect(currentDsn, loop_);
 		if (err.ok()) err = db().Status();
 		if (err.ok()) output_() << "Succesfully connected to " << currentDsn << std::endl;
 		return err;
-	} else if (subCommand == "create"sv) {
+	} else if (subCommand == "create") {
 		auto dbName = parser.NextToken();
 		std::string currentDsn = getCurrentDsn() + std::string(dbName);
-		stop(false);
+		Error err = stop(false);
+		if (!err.ok()) return err;
 		output_() << "Creating database '" << dbName << "'" << std::endl;
-		auto err = db().Connect(currentDsn, loop_, reindexer::client::ConnectOpts().CreateDBIfMissing());
+		err = db().Connect(currentDsn, loop_, reindexer::client::ConnectOpts().CreateDBIfMissing());
 		if (!err.ok()) {
 			std::cerr << "Error on database '" << dbName << "' creation" << std::endl;
 			return err;
@@ -1169,14 +1145,11 @@ std::function<void(std::chrono::system_clock::time_point)> CommandsExecutor<rein
 			q.Where(kBenchIndex, CondEq, count % kBenchItemsCount);
 			auto results = new typename reindexer::Reindexer::QueryResultsT;
 
-			const auto err = db().WithCompletion([results, &errCount](const Error& err) {
-									 delete results;
-									 if (!err.ok()) errCount++;
-								 })
-								 .Select(q, *results);
-			if (!err.ok()) {
-				++errCount;
-			}
+			db().WithCompletion([results, &errCount](const Error& err) {
+					delete results;
+					if (!err.ok()) errCount++;
+				})
+				.Select(q, *results);
 		}
 	};
 }

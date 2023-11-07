@@ -14,22 +14,18 @@ public:
 	struct dataHeader {
 		dataHeader() noexcept : refcount(1), cap(0), lsn(-1) {}
 
-		~dataHeader() { assertrx(refcount.load(std::memory_order_acquire) == 0); }
+		~dataHeader() { assertrx(refcount.load() == 0); }
 		refcounter refcount;
 		unsigned cap;
 		int64_t lsn;
 	};
 
 	PayloadValue() noexcept : p_(nullptr) {}
-	PayloadValue(const PayloadValue &other) noexcept : p_(other.p_) {
-		if (p_) {
-			header()->refcount.fetch_add(1, std::memory_order_relaxed);
-		}
-	}
+	PayloadValue(const PayloadValue &) noexcept;
 	// Alloc payload store with size, and copy data from another array
 	PayloadValue(size_t size, const uint8_t *ptr = nullptr, size_t cap = 0);
-	~PayloadValue() { release(); }
-	PayloadValue &operator=(const PayloadValue &other) noexcept {
+	~PayloadValue();
+	PayloadValue &operator=(const PayloadValue &other) {
 		if (&other != this) {
 			release();
 			p_ = other.p_;
@@ -56,8 +52,8 @@ public:
 	uint8_t *Ptr() const noexcept { return p_ + sizeof(dataHeader); }
 	void SetLSN(int64_t lsn) { header()->lsn = lsn; }
 	int64_t GetLSN() const { return p_ ? header()->lsn : 0; }
-	bool IsFree() const noexcept { return bool(p_ == nullptr); }
-	void Free() noexcept { release(); }
+	bool IsFree() const { return bool(p_ == nullptr); }
+	void Free() { release(); }
 	size_t GetCapacity() const noexcept { return header()->cap; }
 	const uint8_t *get() const noexcept { return p_; }
 

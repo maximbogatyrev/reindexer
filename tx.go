@@ -598,7 +598,7 @@ func (tx *Tx) commitInternal() (count int, err error) {
 	rdSer := newSerializer(out.GetBuf())
 
 	rawQueryParams := rdSer.readRawQueryParams(func(nsid int) {
-		tx.ns.cjsonState.ReadPayloadType(&rdSer.Serializer, tx.db.binding, tx.ns.name)
+		tx.ns.cjsonState.ReadPayloadType(&rdSer.Serializer)
 	})
 
 	if rawQueryParams.count == 0 {

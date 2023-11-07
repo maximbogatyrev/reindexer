@@ -32,7 +32,7 @@ TEST_F(QueriesApi, QueriesStandardTestSet) {
 		auto& items = insertedItems_[default_namespace];
 		for (auto it = items.begin(); it != items.end();) {
 			Error err = rt.reindexer->Delete(default_namespace, it->second);
-			ASSERT_TRUE(err.ok()) << err.what();
+			EXPECT_TRUE(err.ok()) << err.what();
 			it = items.erase(it);
 			if (++itemsCount == 4000) break;
 		}
@@ -43,7 +43,7 @@ TEST_F(QueriesApi, QueriesStandardTestSet) {
 		itemsCount = 0;
 		for (auto it = items.begin(); it != items.end();) {
 			Error err = rt.reindexer->Delete(default_namespace, it->second);
-			ASSERT_TRUE(err.ok()) << err.what();
+			EXPECT_TRUE(err.ok()) << err.what();
 			it = items.erase(it);
 			if (++itemsCount == 5000) break;
 		}
@@ -52,7 +52,7 @@ TEST_F(QueriesApi, QueriesStandardTestSet) {
 			auto itToRemove = items.begin();
 			if (itToRemove != items.end()) {
 				Error err = rt.reindexer->Delete(default_namespace, itToRemove->second);
-				ASSERT_TRUE(err.ok()) << err.what();
+				EXPECT_TRUE(err.ok()) << err.what();
 				items.erase(itToRemove);
 			}
 			FillDefaultNamespace(rand() % 100, 1, 0);
@@ -62,7 +62,7 @@ TEST_F(QueriesApi, QueriesStandardTestSet) {
 				std::advance(itToRemove, rand() % std::min(100, int(items.size())));
 				if (itToRemove != items.end()) {
 					Error err = rt.reindexer->Delete(default_namespace, itToRemove->second);
-					ASSERT_TRUE(err.ok()) << err.what();
+					EXPECT_TRUE(err.ok()) << err.what();
 					items.erase(itToRemove);
 				}
 			}
@@ -70,7 +70,7 @@ TEST_F(QueriesApi, QueriesStandardTestSet) {
 
 		for (auto it = items.begin(); it != items.end();) {
 			Error err = rt.reindexer->Delete(default_namespace, it->second);
-			ASSERT_TRUE(err.ok()) << err.what();
+			EXPECT_TRUE(err.ok()) << err.what();
 			it = items.erase(it);
 		}
 
@@ -104,18 +104,6 @@ TEST_F(QueriesApi, QueriesConditions) {
 	FillConditionsNs();
 	CheckConditions();
 }
-
-#if !defined(REINDEX_WITH_TSAN)
-TEST_F(QueriesApi, UuidQueries) {
-	FillUUIDNs();
-	// hack to obtain not index not string uuid fields
-	/*auto err = rt.reindexer->DropIndex(uuidNs, {kFieldNameUuidNotIndex2});  // TODO uncomment this #1470
-	ASSERT_TRUE(err.ok()) << err.what();
-	err = rt.reindexer->DropIndex(uuidNs, {kFieldNameUuidNotIndex3});
-	ASSERT_TRUE(err.ok()) << err.what();*/
-	CheckUUIDQueries();
-}
-#endif
 
 TEST_F(QueriesApi, IndexCacheInvalidationTest) {
 	std::vector<std::pair<int, int>> data{{0, 10}, {1, 9}, {2, 8}, {3, 7}, {4, 6},	{5, 5},
@@ -352,15 +340,15 @@ TEST_F(QueriesApi, StrictModeTest) {
 	const std::string kNotExistingField = "some_random_name123";
 	QueryResults qr;
 	{
-		Query query = Query(testSimpleNs).Where(kNotExistingField, CondEmpty, {});
+		Query query = Query(testSimpleNs).Where(kNotExistingField, CondEmpty, 0);
 		Error err = rt.reindexer->Select(query.Strict(StrictModeNames), qr);
-		EXPECT_EQ(err.code(), errQueryExec);
+		EXPECT_EQ(err.code(), errParams);
 		qr.Clear();
 		err = rt.reindexer->Select(query.Strict(StrictModeIndexes), qr);
-		EXPECT_EQ(err.code(), errQueryExec);
+		EXPECT_EQ(err.code(), errParams);
 		qr.Clear();
 		err = rt.reindexer->Select(query.Strict(StrictModeNone), qr);
-		ASSERT_TRUE(err.ok()) << err.what();
+		EXPECT_TRUE(err.ok()) << err.what();
 		Verify(qr, Query(testSimpleNs), *rt.reindexer);
 		qr.Clear();
 	}
@@ -368,13 +356,13 @@ TEST_F(QueriesApi, StrictModeTest) {
 	{
 		Query query = Query(testSimpleNs).Where(kNotExistingField, CondEq, 0);
 		Error err = rt.reindexer->Select(query.Strict(StrictModeNames), qr);
-		EXPECT_EQ(err.code(), errQueryExec);
+		EXPECT_EQ(err.code(), errParams);
 		qr.Clear();
 		err = rt.reindexer->Select(query.Strict(StrictModeIndexes), qr);
-		EXPECT_EQ(err.code(), errQueryExec);
+		EXPECT_EQ(err.code(), errParams);
 		qr.Clear();
 		err = rt.reindexer->Select(query.Strict(StrictModeNone), qr);
-		ASSERT_TRUE(err.ok()) << err.what();
+		EXPECT_TRUE(err.ok()) << err.what();
 		EXPECT_EQ(qr.Count(), 0);
 	}
 }
@@ -465,7 +453,6 @@ TEST_F(QueriesApi, JoinByNotIndexField) {
 	ASSERT_EQ(qr.Count(), sizeof(expectedIds) / sizeof(int));
 	for (size_t i = 0; i < qr.Count(); ++i) {
 		Item item = qr[i].GetItem(false);
-		ASSERT_TRUE(item.Status().ok()) << item.Status().what();
 		VariantArray values = item["id"];
 		ASSERT_EQ(values.size(), 1);
 		EXPECT_EQ(values[0].As<int>(), expectedIds[i]);
@@ -820,18 +807,14 @@ TEST_F(QueriesApi, ConvertationStringToDoubleDuringSorting) {
 
 std::string print(const reindexer::Query& q, reindexer::QueryResults::Iterator& currIt, reindexer::QueryResults::Iterator& prevIt,
 				  const reindexer::QueryResults& qr) {
-	assertrx(currIt.Status().ok());
 	std::string res = '\n' + q.GetSQL() + "\ncurr: ";
 	reindexer::WrSerializer ser;
-	const auto err = currIt.GetJSON(ser, false);
-	assertrx(err.ok());
+	currIt.GetJSON(ser, false);
 	res += ser.Slice();
 	if (prevIt != qr.end()) {
-		assertrx(prevIt.Status().ok());
 		res += "\nprev: ";
 		ser.Reset();
-		const auto err = prevIt.GetJSON(ser, false);
-		assertrx(err.ok());
+		prevIt.GetJSON(ser, false);
 		res += ser.Slice();
 	}
 	return res;

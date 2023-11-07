@@ -18,7 +18,7 @@ public:
 	PayloadType &operator=(PayloadType &&) = default;
 	PayloadType &operator=(const PayloadType &) = default;
 	PayloadType(const std::string &name, std::initializer_list<PayloadFieldType> fields = {});
-	explicit PayloadType(const PayloadTypeImpl &impl);
+	PayloadType(const PayloadTypeImpl &impl);
 	~PayloadType();
 	const PayloadFieldType &Field(int field) const;
 

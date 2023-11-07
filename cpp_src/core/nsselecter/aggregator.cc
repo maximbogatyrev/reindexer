@@ -26,13 +26,8 @@ static void copy(It begin, It end, std::vector<FacetResult> &facets, const Field
 			ConstPayload pl(payloadType, begin->first);
 			VariantArray va;
 			if (fields[i] == IndexValueType::SetByJsonPath) {
-				if (fields.isTagsPathIndexed(tagPathIdx)) {
-					const IndexedTagsPath &tagsPath = fields.getIndexedTagsPath(tagPathIdx++);
-					pl.GetByJsonPath(tagsPath, va, KeyValueType::Undefined{});
-				} else {
-					const TagsPath &tagsPath = fields.getTagsPath(tagPathIdx++);
-					pl.GetByJsonPath(tagsPath, va, KeyValueType::Undefined{});
-				}
+				const TagsPath &tagsPath = fields.getTagsPath(tagPathIdx++);
+				pl.GetByJsonPath(tagsPath, va, KeyValueType::Undefined{});
 				if (va.IsObjectValue()) {
 					throw Error(errQueryExec, "Cannot aggregate object field");
 				}
@@ -226,7 +221,7 @@ Aggregator::Aggregator(const PayloadType &payloadType, const FieldsSet &fields, 
 				}
 			} else {
 				if (sort.empty()) {
-					facets_ = std::make_unique<Facets>(MultifieldUnorderedMap{PayloadType{payloadType_}, FieldsSet{fields_}});
+					facets_ = std::make_unique<Facets>(MultifieldUnorderedMap{payloadType_, fields_});
 				} else {
 					facets_ = std::make_unique<Facets>(MultifieldOrderedMap{MultifieldComparator{sort, fields_, payloadType_}});
 				}

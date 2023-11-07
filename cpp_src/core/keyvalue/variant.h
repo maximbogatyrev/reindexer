@@ -19,7 +19,6 @@ class Point;
 class Uuid;
 
 enum class WithString : bool { No = false, Yes = true };
-enum class CheckIsStringPrintable : bool { No = false, Yes = true };
 
 class Variant {
 	friend Uuid;
@@ -141,11 +140,11 @@ public:
 	bool IsNullValue() const noexcept { return Type().Is<KeyValueType::Null>(); }
 
 	template <typename T>
-	void Dump(T &os, CheckIsStringPrintable checkPrintableString = CheckIsStringPrintable::Yes) const;
+	void Dump(T &os) const;
 
 private:
 	bool isUuid() const noexcept { return uuid_.isUuid != 0; }
-	void convertToComposite(const PayloadType &, const FieldsSet &);
+	void convertToComposite(const PayloadType *, const FieldsSet *);
 	void free() noexcept;
 	void copy(const Variant &other);
 	template <typename T>
@@ -213,8 +212,6 @@ template <>
 std::string Variant::As<std::string>() const;
 
 class VariantArray : public h_vector<Variant, 2> {
-	using Base = h_vector<Variant, 2>;
-
 public:
 	VariantArray() noexcept = default;
 	explicit VariantArray(Point) noexcept;
@@ -228,14 +225,9 @@ public:
 		return std::move(*this);
 	}
 	void MarkObject() noexcept { isObjectValue = true; }
-	using Base::Base;
-	using Base::operator==;
-	using Base::operator!=;
-	template <bool FreeHeapMemory = true>
-	void clear() noexcept {
-		isArrayValue = isObjectValue = false;
-		Base::clear<FreeHeapMemory>();
-	}
+	using h_vector<Variant, 2>::h_vector;
+	using h_vector<Variant, 2>::operator==;
+	using h_vector<Variant, 2>::operator!=;
 	size_t Hash() const noexcept {
 		size_t ret = this->size();
 		for (size_t i = 0; i < this->size(); ++i) ret = (ret * 127) ^ this->at(i).Hash();
@@ -246,7 +238,7 @@ public:
 	bool IsNullValue() const noexcept { return size() == 1 && front().IsNullValue(); }
 	KeyValueType ArrayType() const noexcept { return empty() ? KeyValueType::Null{} : front().Type(); }
 	template <typename T>
-	void Dump(T &os, CheckIsStringPrintable checkPrintableString = CheckIsStringPrintable::Yes) const;
+	void Dump(T &os) const;
 	template <WithString>
 	int RelaxCompare(const VariantArray &other, const CollateOpts & = CollateOpts{}) const;
 	void EnsureHold() {

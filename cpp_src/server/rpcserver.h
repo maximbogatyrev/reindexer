@@ -23,9 +23,7 @@ namespace reindexer_server {
 using namespace reindexer::net;
 using namespace reindexer;
 
-enum class RPCSocketT : bool { Unx, TCP };
-
-struct RPCClientData final : public cproto::ClientData {
+struct RPCClientData : public cproto::ClientData {
 	~RPCClientData();
 	h_vector<RPCQrId, 8> results;
 	std::vector<Transaction> txs;
@@ -44,7 +42,7 @@ public:
 			  IStatsWatcher *statsCollector = nullptr);
 	~RPCServer();
 
-	bool Start(const std::string &addr, ev::dynamic_loop &loop, RPCSocketT sockDomain, std::string_view threadingMode);
+	bool Start(const std::string &addr, ev::dynamic_loop &loop);
 	void Stop() {
 		terminate_ = true;
 		if (qrWatcherThread_.joinable()) {
@@ -123,7 +121,7 @@ protected:
 	void clearTx(cproto::Context &ctx, uint64_t txId);
 
 	Reindexer getDB(cproto::Context &ctx, UserRole role);
-	constexpr static std::string_view statsSourceName() noexcept { return std::string_view{"rpc"}; }
+	constexpr static std::string_view statsSourceName() { return std::string_view{"rpc"}; }
 
 	DBManager &dbMgr_;
 	cproto::Dispatcher dispatcher_;
@@ -140,7 +138,6 @@ protected:
 	RPCQrWatcher qrWatcher_;
 	std::atomic<bool> terminate_ = {false};
 	ev::async qrWatcherTerminateAsync_;
-	std::string_view protocolName_;
 };
 
 }  // namespace reindexer_server

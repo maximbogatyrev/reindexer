@@ -26,15 +26,7 @@ public:
 class TransactionImpl {
 public:
 	TransactionImpl(const std::string &nsName, const PayloadType &pt, const TagsMatcher &tm, const FieldsSet &pf,
-					std::shared_ptr<const Schema> schema)
-		: payloadType_(pt),
-		  tagsMatcher_(tm),
-		  pkFields_(pf),
-		  schema_(std::move(schema)),
-		  nsName_(nsName),
-		  tagsUpdated_(false),
-		  hasDeleteItemSteps_(false),
-		  startTime_(std::chrono::high_resolution_clock::now()) {}
+					std::shared_ptr<const Schema> schema);
 
 	void Insert(Item &&item);
 	void Update(Item &&item);
@@ -46,7 +38,6 @@ public:
 	void UpdateTagsMatcherFromItem(ItemImpl *ritem);
 	Item NewItem();
 	Item GetItem(TransactionStep &&st);
-	void ValidatePK(const FieldsSet &pkFields);
 
 	const std::string &GetName() { return nsName_; }
 
@@ -60,7 +51,6 @@ public:
 	std::vector<TransactionStep> steps_;
 	std::string nsName_;
 	bool tagsUpdated_;
-	bool hasDeleteItemSteps_;
 	std::mutex mtx_;
 	Transaction::time_point startTime_;
 };

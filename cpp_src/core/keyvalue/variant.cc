@@ -559,14 +559,8 @@ Variant Variant::convert(KeyValueType type, const PayloadType *payloadType, cons
 Variant &Variant::convert(KeyValueType type, const PayloadType *payloadType, const FieldsSet *fields) & {
 	if (isUuid()) {
 		type.EvaluateOneOf([&](KeyValueType::Uuid) noexcept {}, [&](KeyValueType::String) { *this = Variant{std::string{Uuid{*this}}}; },
-						   [&](KeyValueType::Composite) {
-							   assertrx_throw(payloadType && fields);
-							   Variant tmp{VariantArray{std::move(*this)}};
-							   tmp.convertToComposite(*payloadType, *fields);
-							   *this = std::move(tmp);
-						   },
 						   [type](OneOf<KeyValueType::Int, KeyValueType::Int64, KeyValueType::Bool, KeyValueType::Double,
-										KeyValueType::Tuple, KeyValueType::Undefined, KeyValueType::Null>) {
+										KeyValueType::Composite, KeyValueType::Tuple, KeyValueType::Undefined, KeyValueType::Null>) {
 							   throw Error(errParams, "Can't convert Variant from type '%s' to type '%s'",
 										   KeyValueType{KeyValueType::Uuid{}}.Name(), type.Name());
 						   });
@@ -578,22 +572,12 @@ Variant &Variant::convert(KeyValueType type, const PayloadType *payloadType, con
 		[&](KeyValueType::Int64) { *this = Variant(As<int64_t>()); }, [&](KeyValueType::Double) { *this = Variant(As<double>()); },
 		[&](KeyValueType::String) { *this = Variant(As<std::string>()); },
 		[&](KeyValueType::Composite) {
-			variant_.type.EvaluateOneOf(
-				[&](KeyValueType::Tuple) {
-					assertrx(payloadType && fields);
-					convertToComposite(*payloadType, *fields);
-				},
-				[](KeyValueType::Composite) noexcept {},
-				[&](OneOf<KeyValueType::Bool, KeyValueType::Int, KeyValueType::Int64, KeyValueType::Double, KeyValueType::String,
-						  KeyValueType::Uuid>) {
-					assertrx(payloadType && fields);
-					Variant tmp{VariantArray{std::move(*this)}};
-					tmp.convertToComposite(*payloadType, *fields);
-					*this = std::move(tmp);
-				},
-				[&](OneOf<KeyValueType::Undefined, KeyValueType::Null>) {
-					throw Error(errParams, "Can't convert Variant from type '%s' to type '%s'", variant_.type.Name(), type.Name());
-				});
+			if (variant_.type.Is<KeyValueType::Tuple>()) {
+				assertrx(payloadType && fields);
+				convertToComposite(payloadType, fields);
+			} else {
+				throw Error(errParams, "Can't convert Variant from type '%s' to type '%s'", variant_.type.Name(), type.Name());
+			}
 		},
 		[&](KeyValueType::Uuid) { *this = Variant{As<Uuid>()}; },
 		[&](OneOf<KeyValueType::Tuple, KeyValueType::Undefined, KeyValueType::Null>) {
@@ -602,7 +586,7 @@ Variant &Variant::convert(KeyValueType type, const PayloadType *payloadType, con
 	return *this;
 }
 
-void Variant::convertToComposite(const PayloadType &payloadType, const FieldsSet &fields) {
+void Variant::convertToComposite(const PayloadType *payloadType, const FieldsSet *fields) {
 	assertrx(!isUuid());
 	assertrx(variant_.type.Is<KeyValueType::Tuple>() && variant_.hold == 1);
 	key_string val = *cast<key_string>();
@@ -610,24 +594,24 @@ void Variant::convertToComposite(const PayloadType &payloadType, const FieldsSet
 	if (variant_.hold == 1) free();
 	// Alloc usual payloadvalue + extra memory for hold string
 
-	auto &pv = *new (cast<void>()) PayloadValue(payloadType.TotalSize() + val->size());
+	auto &pv = *new (cast<void>()) PayloadValue(payloadType->TotalSize() + val->size());
 	variant_.hold = 1;
 	variant_.type = KeyValueType::Composite{};
 
 	// Copy serializer buffer with strings to extra payloadvalue memory
-	char *data = reinterpret_cast<char *>(pv.Ptr() + payloadType.TotalSize());
+	char *data = reinterpret_cast<char *>(pv.Ptr() + payloadType->TotalSize());
 	memcpy(data, val->data(), val->size());
 
 	Serializer ser(std::string_view(data, val->size()));
 
 	size_t count = ser.GetVarUint();
-	if (count != fields.size()) {
-		throw Error(errLogic, "Invalid count of arguments for composite index, expected %d, got %d", fields.size(), count);
+	if (count != fields->size()) {
+		throw Error(errLogic, "Invalid count of arguments for composite index, expected %d, got %d", fields->size(), count);
 	}
 
-	Payload pl(payloadType, pv);
+	Payload pl(*payloadType, pv);
 
-	for (auto field : fields) {
+	for (auto field : *fields) {
 		if (field != IndexValueType::SetByJsonPath) {
 			pl.Set(field, ser.GetVariant());
 		} else {
@@ -684,14 +668,14 @@ Variant::operator const PayloadValue &() const noexcept {
 }
 
 template <typename T>
-void Variant::Dump(T &os, CheckIsStringPrintable checkPrintableString) const {
+void Variant::Dump(T &os) const {
 	if (isUuid()) {
 		os << Uuid{*this};
 	} else {
 		variant_.type.EvaluateOneOf(
 			[&](KeyValueType::String) {
 				p_string str(*this);
-				if (checkPrintableString == CheckIsStringPrintable::No || isPrintable(str)) {
+				if (isPrintable(str)) {
 					os << '\'' << std::string_view(str) << '\'';
 				} else {
 					os << "slice{len:" << str.length() << "}";
@@ -704,23 +688,23 @@ void Variant::Dump(T &os, CheckIsStringPrintable checkPrintableString) const {
 	}
 }
 
-template void Variant::Dump(WrSerializer &, CheckIsStringPrintable) const;
-template void Variant::Dump(std::ostream &, CheckIsStringPrintable) const;
-template void Variant::Dump(std::stringstream &, CheckIsStringPrintable) const;
+template void Variant::Dump(WrSerializer &) const;
+template void Variant::Dump(std::ostream &) const;
+template void Variant::Dump(std::stringstream &) const;
 
 template <typename T>
-void VariantArray::Dump(T &os, CheckIsStringPrintable checkPrintableString) const {
+void VariantArray::Dump(T &os) const {
 	os << '{';
 	for (auto &arg : *this) {
 		if (&arg != &at(0)) os << ", ";
-		arg.Dump(os, checkPrintableString);
+		arg.Dump(os);
 	}
 	os << '}';
 }
 
-template void VariantArray::Dump(WrSerializer &, CheckIsStringPrintable) const;
-template void VariantArray::Dump(std::ostream &, CheckIsStringPrintable) const;
-template void VariantArray::Dump(std::stringstream &, CheckIsStringPrintable) const;
+template void VariantArray::Dump(WrSerializer &) const;
+template void VariantArray::Dump(std::ostream &) const;
+template void VariantArray::Dump(std::stringstream &) const;
 
 VariantArray::VariantArray(Point p) noexcept {
 	emplace_back(p.X());

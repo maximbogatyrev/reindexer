@@ -7,7 +7,7 @@
 #include "core/index/rtree/rstarsplitter.h"
 #include "gtest/gtest.h"
 #include "reindexer_api.h"
-#include "tools/randompoint.h"
+#include "tools/random.h"
 
 namespace {
 
@@ -72,7 +72,7 @@ static void TestInsert() {
 
 	size_t insertedCount = 0;
 	for (size_t i = 0; i < 10000; ++i) {
-		const auto p = reindexer::randPoint(kRange);
+		const auto p = randPoint(kRange);
 		const auto insertRes{tree.insert(reindexer::Point{p})};
 		if (insertRes.second) {
 			++insertedCount;
@@ -100,7 +100,7 @@ static void TestIterators() {
 
 	size_t dublicates = 0;
 	for (size_t i = 0; i < 10000 + dublicates; ++i) {
-		const auto res = tree.insert(reindexer::randPoint(kRange));
+		const auto res = tree.insert(randPoint(kRange));
 		if (!res.second) ++dublicates;
 		ASSERT_TRUE(tree.Check());
 		auto it = tree.begin(), end = tree.end();
@@ -129,8 +129,6 @@ TEST(RTree, RStarIterators) { TestIterators<reindexer::RStarSplitter>(); }
 template <template <typename, typename, typename, typename, size_t, size_t> class Splitter>
 static void TestSearch() {
 	using RTree = reindexer::RectangleTree<reindexer::Point, Splitter, 16, 8>;
-	using reindexer::randPoint;
-	using reindexer::randBinDouble;
 	constexpr size_t kCount = 100000;
 
 	RTree tree;
@@ -170,7 +168,6 @@ TEST(RTree, RStarSearch) { TestSearch<reindexer::RStarSplitter>(); }
 template <template <typename, typename, typename, typename, size_t, size_t> class Splitter>
 static void TestDelete() {
 	using RTree = reindexer::RectangleTree<reindexer::Point, Splitter, 16, 8>;
-	using reindexer::randPoint;
 	constexpr size_t kCount = 10000;
 
 	RTree tree;
@@ -204,7 +201,7 @@ static void TestErase() {
 
 	RTree tree;
 	for (size_t i = 0; i < kCount;) {
-		i += tree.insert(reindexer::randPoint(kRange)).second;
+		i += tree.insert(randPoint(kRange)).second;
 	}
 	ASSERT_TRUE(tree.Check());
 	ASSERT_EQ(tree.size(), kCount);
@@ -229,8 +226,6 @@ TEST(RTree, RStarErase) { TestErase<reindexer::RStarSplitter>(); }
 template <template <typename, typename, typename, typename, size_t, size_t> class Splitter>
 static void TestMap() {
 	using Map = reindexer::RTreeMap<size_t, Splitter, 16, 8>;
-	using reindexer::randPoint;
-	using reindexer::randBinDouble;
 	constexpr size_t kCount = 10000;
 
 	Map map;

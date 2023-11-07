@@ -1,6 +1,6 @@
 #include "aggregation.h"
 #include "core/cjson/jsonbuilder.h"
-#include "tools/randompoint.h"
+#include "tools/random.h"
 
 template <size_t N>
 void Aggregation::Insert(State& state) {

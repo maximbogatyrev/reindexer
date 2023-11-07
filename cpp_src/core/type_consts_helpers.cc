@@ -110,8 +110,6 @@ namespace reindexer {
 	return "unknown"sv;
 }
 
-}  // namespace reindexer
-
 [[nodiscard]] std::string_view JoinTypeName(JoinType type) {
 	using namespace std::string_view_literals;
 
@@ -128,3 +126,5 @@ namespace reindexer {
 	assertrx(false);
 	return "unknown"sv;
 }
+
+}  // namespace reindexer

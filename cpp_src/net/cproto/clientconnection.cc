@@ -20,7 +20,7 @@ bool ClientConnection::ConnectData::CurrDsnFailed(int failedDsnIdx) const { retu
 int ClientConnection::ConnectData::GetNextDsnIndex() const { return (validEntryIdx.load(std::memory_order_acquire) + 1) % entries.size(); }
 
 ClientConnection::ClientConnection(ev::dynamic_loop &loop, ConnectData *connectData, ConnectionFailCallback connectionFailCallback)
-	: ConnectionMT(socket(), loop, false),
+	: ConnectionMT(-1, loop, false),
 	  state_(ConnInit),
 	  completions_(kMaxCompletions),
 	  seq_(0),
@@ -86,11 +86,7 @@ void ClientConnection::connectInternal() noexcept {
 			closeConn();
 		}
 	};
-	if (sock_.connect((connectEntry.uri.hostname() + ':' + port), socket_domain::tcp) != 0) {
-		if rx_unlikely (!sock_.would_block(sock_.last_error())) {
-			perror("sock_.connect() error");
-		}
-	}
+	sock_.connect((connectEntry.uri.hostname() + ":" + port));
 	if (!sock_.valid()) {
 		completion(RPCAnswer(Error(errNetwork, "Socket connect error: %d", sock_.last_error())), this);
 	} else {
@@ -174,12 +170,12 @@ void ClientConnection::deadline_check_cb(ev::timer &, int) {
 				if (state_ == ConnFailed || state_ == ConnClosing) {
 					return;
 				}
-				{
-					std::lock_guard lck(mtx_);
+				if (bufWait_) {
+					std::unique_lock<std::mutex> lck(mtx_);
 					cc->used = false;
-					if (bufWait_) {
-						bufCond_.notify_all();
-					}
+					bufCond_.notify_all();
+				} else {
+					cc->used = false;
 				}
 				io_.loop.break_loop();
 			}
@@ -215,7 +211,7 @@ void ClientConnection::onClose() {
 		// before we switch to ConnFailed state
 		std::vector<RPCCompletion> tmpCompletions(kMaxCompletions);
 
-		std::unique_lock lck(mtx_);
+		mtx_.lock();
 		wrBuf_.clear();
 		if (lastError_.ok())
 			lastError_ = Error(errNetwork, "Socket connection to %s closed",
@@ -226,7 +222,7 @@ void ClientConnection::onClose() {
 		State prevState = state_;
 		state_ = ConnClosing;
 		completions_.swap(tmpCompletions);
-		lck.unlock();
+		mtx_.unlock();
 
 		keep_alive_.stop();
 		deadlineTimer_.stop();
@@ -241,9 +237,9 @@ void ClientConnection::onClose() {
 		std::unique_ptr<Completion> tmpUpdatesHandler(updatesHandler_.release(std::memory_order_acq_rel));
 
 		if (tmpUpdatesHandler) (*tmpUpdatesHandler)(RPCAnswer(lastError_), this);
-		lck.lock();
+		mtx_.lock();
 		bufCond_.notify_all();
-		lck.unlock();
+		mtx_.unlock();
 
 		if (prevState == ConnConnecting) {
 			currDsnIdx_ = actualDsnIdx_;
@@ -343,12 +339,12 @@ ClientConnection::ReadResT ClientConnection::onRead() {
 					rdBuf_.clear();
 					return ReadResT::Default;
 				}
-				{
-					std::lock_guard lck(mtx_);
+				if (bufWait_) {
+					std::unique_lock<std::mutex> lck(mtx_);
 					completion->used = false;
-					if (bufWait_) {
-						bufCond_.notify_all();
-					}
+					bufCond_.notify_all();
+				} else {
+					completion->used = false;
 				}
 
 				if (terminate_.load(std::memory_order_acquire) && !PendingCompletions()) {
@@ -360,8 +356,7 @@ ClientConnection::ReadResT ClientConnection::onRead() {
 			}
 			if (!completion) {
 				auto cmdSv = CmdName(hdr.cmd);
-				fprintf(stderr, "RxClientConnection: unexpected RPC answer seq=%d cmd=%d(%.*s)\n", int(hdr.seq), hdr.cmd, int(cmdSv.size()),
-						cmdSv.data());
+				fprintf(stderr, "Unexpected RPC answer seq=%d cmd=%d(%.*s)\n", int(hdr.seq), hdr.cmd, int(cmdSv.size()), cmdSv.data());
 			}
 		}
 	}
@@ -409,15 +404,15 @@ chunk ClientConnection::packRPC(CmdCode cmd, uint32_t seq, const Args &args, con
 	return ser.DetachChunk();
 }
 
-ClientConnection::CallReturn ClientConnection::call(const Completion &cmpl, const CommandParams &opts, const Args &args) {
+void ClientConnection::call(const Completion &cmpl, const CommandParams &opts, const Args &args) {
 	if (opts.cancelCtx) {
 		switch (opts.cancelCtx->GetCancelType()) {
 			case CancelType::Explicit:
 				cmpl(RPCAnswer(Error(errCanceled, "Canceled by context")), this);
-				return CallReturn();
+				return;
 			case CancelType::Timeout:
 				cmpl(RPCAnswer(Error(errTimeout, "Canceled by timeout")), this);
-				return CallReturn();
+				return;
 			case CancelType::None:
 				break;
 		}
@@ -437,13 +432,6 @@ ClientConnection::CallReturn ClientConnection::call(const Completion &cmpl, cons
 					break;
 				case ConnInit:
 				case ConnFailed:
-					if (!connect_async_.loop.is_valid()) {
-						assertrx_dbg(false);
-						lck.unlock();
-						fprintf(stderr, "RxClientConnection::async_ is not valid\n");
-						cmpl(RPCAnswer(Error(errTimeout, "RPCClient::connect_async_ is not valid")), this);
-						return CallReturn();
-					}
 					connect_async_.send();
 					state_ = ConnInit;
 					// fall through
@@ -459,7 +447,7 @@ ClientConnection::CallReturn ClientConnection::call(const Completion &cmpl, cons
 							if (deadline.count() && deadline <= Now()) {
 								lck.unlock();
 								cmpl(RPCAnswer(Error(errTimeout, "Connection deadline exceeded")), this);
-								return CallReturn();
+								return;
 							}
 							completion = &completions_[seq % completions_.size()];
 						}
@@ -467,19 +455,21 @@ ClientConnection::CallReturn ClientConnection::call(const Completion &cmpl, cons
 							auto err = lastError_;
 							lck.unlock();
 							cmpl(RPCAnswer(err), this);
-							return CallReturn();
+							return;
 						}
 					}
 					break;
 				case ConnClosing:
-					closingCond_.wait(lck, [this] { return state_ == ConnFailed; });
+					while (state_ != ConnFailed) {
+						closingCond_.wait(lck);
+					}
 					completion = &completions_[seq % completions_.size()];
 					break;
 				default:
 					std::abort();
 			}
 			if (completion->used) {
-				CounterGuardIR32 cg(bufWait_);
+				bufWait_++;
 				struct {
 					uint32_t seq;
 					RPCCompletion *cmpl;
@@ -490,6 +480,7 @@ ClientConnection::CallReturn ClientConnection::call(const Completion &cmpl, cons
 					return !arg.cmpl->used.load();
 				});
 				completion = arg.cmpl;
+				bufWait_--;
 			}
 		}
 	} else {
@@ -500,9 +491,8 @@ ClientConnection::CallReturn ClientConnection::call(const Completion &cmpl, cons
 			if (state_ == ConnFailed) {
 				lck.unlock();
 				cmpl(RPCAnswer(lastError_), this);
-				return CallReturn();
+				return;
 			}
-			completion = &completions_[seq % completions_.size()];
 		}
 		while (completion->used) {
 			if (!completion->next) completion->next.reset(new RPCCompletion);
@@ -520,11 +510,9 @@ ClientConnection::CallReturn ClientConnection::call(const Completion &cmpl, cons
 	try {
 		wrBuf_.write(std::move(data));
 	} catch (Error &e) {
-		fprintf(stderr, "RxClientConnection::wrBuf_.write exception: '%s'\n", e.what().c_str());
 		completion->used = false;
-		lck.unlock();
 		cmpl(RPCAnswer(e), this);
-		return CallReturn();
+		return;
 	}
 
 	lck.unlock();
@@ -534,21 +522,8 @@ ClientConnection::CallReturn ClientConnection::call(const Completion &cmpl, cons
 			callback(io_, ev::WRITE);
 		}
 	} else {
-		if (!async_.loop.is_valid()) {
-			lck.lock();
-			assertrx_dbg(false);
-			if (completion == &completions_[seq % completions_.size()]) {
-				completion->used = false;
-			}
-			lck.unlock();
-			fprintf(stderr, "RxClientConnection::async_ is not valid\n");
-
-			cmpl(RPCAnswer(Error(errTimeout, "RPCClient::async_ is not valid")), this);
-			return CallReturn();
-		}
 		async_.send();
 	}
-	return CallReturn(completion, seq);
 }
 
 }  // namespace cproto

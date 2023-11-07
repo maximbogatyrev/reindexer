@@ -36,9 +36,7 @@ struct ServerConfig {
 	std::string StorageEngine;
 	std::string HTTPAddr;
 	std::string RPCAddr;
-	std::string RPCUnixAddr;
 	std::string RPCThreadingMode;
-	std::string RPCUnixThreadingMode;
 	std::string HttpThreadingMode;
 	std::string LogLevel;
 	std::string ServerLog;
@@ -65,8 +63,6 @@ struct ServerConfig {
 	std::chrono::milliseconds PrometheusCollectPeriod;
 	bool DebugAllocs;
 	std::chrono::seconds TxIdleTimeout;
-	std::chrono::seconds HttpReadTimeout;
-	std::chrono::seconds HttpWriteTimeout;
 	size_t MaxUpdatesSize;
 	bool EnableGRPC;
 	std::string GRPCAddr;
@@ -77,6 +73,7 @@ struct ServerConfig {
 
 	static const std::string kDedicatedThreading;
 	static const std::string kSharedThreading;
+	static const std::string kPoolThreading;
 
 protected:
 	Error fromYaml(YAML::Node& root);

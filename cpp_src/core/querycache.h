@@ -8,9 +8,9 @@
 
 namespace reindexer {
 
-struct QueryCountCacheVal {
-	QueryCountCacheVal() = default;
-	QueryCountCacheVal(size_t total) noexcept : total_count(total) {}
+struct QueryTotalCountCacheVal {
+	QueryTotalCountCacheVal() = default;
+	QueryTotalCountCacheVal(size_t total) noexcept : total_count(total) {}
 
 	size_t Size() const noexcept { return 0; }
 
@@ -49,8 +49,9 @@ struct HashQueryCacheKey {
 	}
 };
 
-using QueryCountCache = LRUCache<QueryCacheKey, QueryCountCacheVal, HashQueryCacheKey, EqQueryCacheKey>;
-
-;
+struct QueryTotalCountCache : LRUCache<QueryCacheKey, QueryTotalCountCacheVal, HashQueryCacheKey, EqQueryCacheKey> {
+	QueryTotalCountCache(size_t sizeLimit = kDefaultCacheSizeLimit, int hitCount = kDefaultHitCountToCache)
+		: LRUCache(sizeLimit, hitCount) {}
+};
 
 }  // namespace reindexer

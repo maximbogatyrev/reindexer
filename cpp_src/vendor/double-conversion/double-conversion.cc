@@ -351,12 +351,12 @@ void DoubleToStringConverter::DoubleToAscii(double v, DtoaMode mode, int request
 
 namespace {
 
-static inline char ToLower(char ch) {
+inline char ToLower(char ch) {
     static const std::ctype<char>& cType = std::use_facet<std::ctype<char> >(std::locale::classic());
     return cType.tolower(ch);
 }
 
-static inline char Pass(char ch) { return ch; }
+inline char Pass(char ch) { return ch; }
 
 template <class Iterator, class Converter>
 static inline bool ConsumeSubStringImpl(Iterator* current, Iterator end, const char* substring, Converter converter) {

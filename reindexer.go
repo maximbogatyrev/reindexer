@@ -76,6 +76,8 @@ const (
 	ErrCodeTimeout          = bindings.ErrTimeout
 )
 
+var logger Logger = &nullLogger{}
+
 // Reindexer The reindxer state struct
 type Reindexer struct {
 	impl *reindexerImpl

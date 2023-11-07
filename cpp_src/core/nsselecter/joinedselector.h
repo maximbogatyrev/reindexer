@@ -88,13 +88,7 @@ public:
 		  joinedSelectorsCount_(joinedSelectorsCount),
 		  rdxCtx_(rdxCtx),
 		  optimized_(false),
-		  inTransaction_{inTransaction} {
-#ifndef NDEBUG
-		for (const auto &jqe : joinQuery_.joinEntries_) {
-			assertrx_throw(jqe.FieldsHaveBeenSet());
-		}
-#endif
-	}
+		  inTransaction_{inTransaction} {}
 
 	JoinedSelector(JoinedSelector &&) = default;
 	JoinedSelector &operator=(JoinedSelector &&) = delete;
@@ -104,7 +98,7 @@ public:
 	bool Process(IdType, int nsId, ConstPayload, bool match);
 	JoinType Type() const noexcept { return joinType_; }
 	void SetType(JoinType type) noexcept { joinType_ = type; }
-	const std::string &RightNsName() const noexcept { return itemQuery_.NsName(); }
+	const std::string &RightNsName() const noexcept { return itemQuery_._namespace; }
 	const JoinedQuery &JoinQuery() const noexcept { return joinQuery_; }
 	int Called() const noexcept { return called_; }
 	int Matched() const noexcept { return matched_; }
@@ -115,11 +109,10 @@ public:
 	const NamespaceImpl::Ptr &RightNs() const noexcept { return rightNs_; }
 
 private:
-	[[nodiscard]] VariantArray readValuesFromRightNs(const QueryJoinEntry &) const;
-	[[nodiscard]] VariantArray readValuesFromPreResult(const QueryJoinEntry &) const;
-	template <typename Cont, typename Fn>
-	[[nodiscard]] VariantArray readValuesOfRightNsFrom(const Cont &from, const Fn &createPayload, const QueryJoinEntry &,
-													   const PayloadType &) const;
+	template <bool byJsonPath>
+	void readValuesFromRightNs(VariantArray &values, KeyValueType leftIndexType, int rightIdxNo, std::string_view rightIndex) const;
+	template <bool byJsonPath>
+	void readValuesFromPreResult(VariantArray &values, KeyValueType leftIndexType, int rightIdxNo, std::string_view rightIndex) const;
 	void selectFromRightNs(QueryResults &joinItemR, const Query &, bool &found, bool &matchedAtLeastOnce);
 	void selectFromPreResultValues(QueryResults &joinItemR, const Query &, bool &found, bool &matchedAtLeastOnce) const;
 
@@ -140,5 +133,8 @@ private:
 	bool inTransaction_{false};
 };
 using JoinedSelectors = std::vector<JoinedSelector>;
+
+extern template void JoinedSelector::readValuesFromPreResult<true>(VariantArray &, KeyValueType, int, std::string_view) const;
+extern template void JoinedSelector::readValuesFromPreResult<false>(VariantArray &, KeyValueType, int, std::string_view) const;
 
 }  // namespace reindexer

@@ -7,7 +7,6 @@
 
 #include "core/cjson/jsonbuilder.h"
 #include "core/ft/config/ftfastconfig.h"
-#include "tools/errors.h"
 #include "tools/stringstools.h"
 
 #include <dlfcn.h>
@@ -242,33 +241,18 @@ reindexer::Item FullText::MakeItem(benchmark::State&) {
 void FullText::BuildInsertSteps(State& state) {
 	AllocsTracker allocsTracker(state, printFlags);
 
-	auto err = db_->DropNamespace(nsdef_.name);
-	if (!err.ok()) {
-		state.SkipWithError(err.what().c_str());
-		assertf(err.ok(), "%s", err.what());
-	}
+	db_->DropNamespace(nsdef_.name);
 	id_seq_->Reset();
 
-	err = BaseFixture::Initialize();
-	if (!err.ok()) {
-		state.SkipWithError(err.what().c_str());
-		assertf(err.ok(), "%s", err.what());
-	}
+	auto err = BaseFixture::Initialize();
 	size_t i = 0;
 	size_t mem = 0;
 
-	assert(!words_.empty());
 	for (auto _ : state) {	// NOLINT(*deadcode.DeadStores)
 		auto item = MakeSpecialItem();
-		if (!item.Status().ok()) {
-			state.SkipWithError(item.Status().what().c_str());
-			assertf(item.Status().ok(), "%s", item.Status().what());
-		}
+		if (!item.Status().ok()) state.SkipWithError(item.Status().what().c_str());
 		err = db_->Insert(nsdef_.name, item);
-		if (!err.ok()) {
-			state.SkipWithError(err.what().c_str());
-			assertf(err.ok(), "%s", err.what());
-		}
+		if (!err.ok()) state.SkipWithError(err.what().c_str());
 
 		if (i % 12000 == 0) {
 			Query q(nsdef_.name);
@@ -295,10 +279,7 @@ void FullText::Insert(State& state) {
 	AllocsTracker allocsTracker(state, printFlags);
 	for (auto _ : state) {	// NOLINT(*deadcode.DeadStores)
 		auto item = MakeItem(state);
-		if (!item.Status().ok()) {
-			state.SkipWithError(item.Status().what().c_str());
-			continue;
-		}
+		if (!item.Status().ok()) state.SkipWithError(item.Status().what().c_str());
 
 		auto err = db_->Insert(nsdef_.name, item);
 		if (!err.ok()) state.SkipWithError(err.what().c_str());
@@ -309,11 +290,10 @@ void FullText::Insert(State& state) {
 }
 
 void FullText::BuildCommonIndexes(benchmark::State& state) {
-	using namespace std::string_view_literals;
 	AllocsTracker allocsTracker(state, printFlags);
 	for (auto _ : state) {	// NOLINT(*deadcode.DeadStores)
 		Query q(nsdef_.name);
-		q.Where("year"sv, CondRange, {2010, 2016}).Limit(20).Sort("year"sv, false);
+		q.Where("year", CondRange, {2010, 2016}).Limit(20).Sort("year", false);
 		std::this_thread::sleep_for(std::chrono::milliseconds(2000));
 
 		QueryResults qres;
@@ -345,10 +325,7 @@ void FullText::BuildAndInsertLowWordsDiversityNs(State& state) {
 		item["description1"] = d1;
 		item["description2"] = d2;
 
-		if (!item.Status().ok()) {
-			state.SkipWithError(item.Status().what().c_str());
-			continue;
-		}
+		if (!item.Status().ok()) state.SkipWithError(item.Status().what().c_str());
 
 		auto err = db_->Insert(lowWordsDiversityNsDef_.name, item);
 		if (!err.ok()) state.SkipWithError(err.what().c_str());
@@ -931,13 +908,7 @@ void FullText::InitForAlternatingUpdatesAndSelects(State& state) {
 	ftCfg.optimization = opt;
 	ftIndexOpts.config = ftCfg.GetJson({});
 	AllocsTracker allocsTracker(state, printFlags);
-	auto err = db_->DropNamespace(alternatingNs_);
-	if (!err.ok()) {
-		if (err.code() != errNotFound || err.what() != "Namespace '" + alternatingNs_ + "' does not exist") {
-			state.SkipWithError(err.what().c_str());
-			assertf(err.ok(), "%s", err.what());
-		}
-	}
+	db_->DropNamespace(alternatingNs_);
 	for (auto _ : state) {	// NOLINT(*deadcode.DeadStores)
 		NamespaceDef nsDef{alternatingNs_};
 		nsDef.AddIndex("id", "hash", "int", IndexOpts().PK())
@@ -947,10 +918,7 @@ void FullText::InitForAlternatingUpdatesAndSelects(State& state) {
 			.AddIndex("search_comp", {"search1", "search2"}, "text", "composite", ftIndexOpts)
 			.AddIndex("search_comp_not_index_fields", {"field1", "field2"}, "text", "composite", ftIndexOpts);
 		auto err = db_->AddNamespace(nsDef);
-		if (!err.ok()) {
-			state.SkipWithError(err.what().c_str());
-			assertf(err.ok(), "%s", err.what());
-		}
+		if (!err.ok()) state.SkipWithError(err.what().c_str());
 		values_.clear();
 		values_.reserve(kNsSize);
 		reindexer::WrSerializer ser;
@@ -966,25 +934,18 @@ void FullText::InitForAlternatingUpdatesAndSelects(State& state) {
 			bld.Put("rand", rand());
 			bld.End();
 			auto item = db_->NewItem(alternatingNs_);
-			if (!item.Status().ok()) {
-				state.SkipWithError(item.Status().what().c_str());
-				continue;
-			}
+			if (!item.Status().ok()) state.SkipWithError(item.Status().what().c_str());
 			err = item.FromJSON(ser.Slice());
-			if (!err.ok()) {
-				state.SkipWithError(err.what().c_str());
-				continue;
-			}
+			if (!err.ok()) state.SkipWithError(err.what().c_str());
 			err = db_->Insert(alternatingNs_, item);
 			if (!err.ok()) state.SkipWithError(err.what().c_str());
 		}
 	}
 
-	err = db_->Commit(alternatingNs_);
+	auto err = db_->Commit(alternatingNs_);
 	if (!err.ok()) state.SkipWithError(err.what().c_str());
 
 	// Init index build
-	assert(!values_.empty());
 	Query q =
 		Query(alternatingNs_)
 			.Where("search1", CondEq,
@@ -1009,7 +970,6 @@ void FullText::InitForAlternatingUpdatesAndSelects(State& state) {
 
 void FullText::updateAlternatingNs(reindexer::WrSerializer& ser, benchmark::State& state) {
 	using namespace std::string_literals;
-	assert(!values_.empty());
 	const int i = randomGenerator_(randomEngine_, std::uniform_int_distribution<int>::param_type{0, int(values_.size() - 1)});
 	ser.Reset();
 	reindexer::JsonBuilder bld(ser);
@@ -1022,15 +982,9 @@ void FullText::updateAlternatingNs(reindexer::WrSerializer& ser, benchmark::Stat
 	bld.End();
 	auto item = db_->NewItem(alternatingNs_);
 	item.Unsafe(false);
-	if (!item.Status().ok()) {
-		state.SkipWithError(item.Status().what().c_str());
-		return;
-	}
+	if (!item.Status().ok()) state.SkipWithError(item.Status().what().c_str());
 	auto err = item.FromJSON(ser.Slice());
-	if (!err.ok()) {
-		state.SkipWithError(err.what().c_str());
-		return;
-	}
+	if (!err.ok()) state.SkipWithError(err.what().c_str());
 	err = db_->Update(alternatingNs_, item);
 	if (!err.ok()) state.SkipWithError(err.what().c_str());
 
@@ -1043,7 +997,6 @@ void FullText::updateAlternatingNs(reindexer::WrSerializer& ser, benchmark::Stat
 }
 
 void FullText::AlternatingUpdatesAndSelects(benchmark::State& state) {
-	assert(!values_.empty());
 	reindexer::WrSerializer ser;
 	AllocsTracker allocsTracker(state, printFlags);
 	for (auto _ : state) {	// NOLINT(*deadcode.DeadStores)
@@ -1062,7 +1015,6 @@ void FullText::AlternatingUpdatesAndSelects(benchmark::State& state) {
 }
 
 void FullText::AlternatingUpdatesAndSelectsByComposite(benchmark::State& state) {
-	assert(!values_.empty());
 	reindexer::WrSerializer ser;
 	AllocsTracker allocsTracker(state, printFlags);
 	for (auto _ : state) {	// NOLINT(*deadcode.DeadStores)
@@ -1078,7 +1030,6 @@ void FullText::AlternatingUpdatesAndSelectsByComposite(benchmark::State& state) 
 }
 
 void FullText::AlternatingUpdatesAndSelectsByCompositeByNotIndexFields(benchmark::State& state) {
-	assert(!values_.empty());
 	reindexer::WrSerializer ser;
 	AllocsTracker allocsTracker(state, printFlags);
 	for (auto _ : state) {	// NOLINT(*deadcode.DeadStores)

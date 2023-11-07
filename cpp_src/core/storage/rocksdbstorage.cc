@@ -6,7 +6,6 @@
 #include <rocksdb/db.h>
 #include <rocksdb/iterator.h>
 #include <rocksdb/slice.h>
-#include "tools/fsops.h"
 
 namespace reindexer {
 namespace datastorage {
@@ -144,10 +143,8 @@ void RocksDbStorage::doDestroy(const std::string& path) {
 	options.create_if_missing = true;
 	db_.reset();
 	rocksdb::Status status = rocksdb::DestroyDB(path.c_str(), options);
-	fprintf(stderr, "Cannot destroy RocksDB's storage: %s, %s. Trying to remove files by the backup mechanism...\n", path.c_str(),
-			status.ToString().c_str());
-	if (fs::RmDirAll(path) != 0) {
-		fprintf(stderr, "Unable to remove RocksDB's storage: %s, %s", path.c_str(), strerror(errno));
+	if (!status.ok()) {
+		printf("Cannot destroy DB: %s, %s\n", path.c_str(), status.ToString().c_str());
 	}
 }
 

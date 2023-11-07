@@ -19,7 +19,7 @@ struct RPCServerConfig {
 
 enum RPCServerStatus { Init, Connected, Stopped };
 
-struct RPCClientData final : public cproto::ClientData {
+struct RPCClientData : public cproto::ClientData {
 	AuthContext auth;
 	int connID;
 };

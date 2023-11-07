@@ -4,8 +4,15 @@
 namespace reindexer {
 namespace net {
 
-manual_connection::manual_connection(size_t rd_buf_size, bool enable_stat)
-	: buffered_data_(rd_buf_size), stats_(enable_stat ? new connection_stats_collector : nullptr) {}
+manual_connection::manual_connection(int fd, size_t rd_buf_size, bool enable_stat)
+	: sock_(fd), buffered_data_(rd_buf_size), stats_(enable_stat ? new connection_stats_collector : nullptr) {}
+
+manual_connection::~manual_connection() {
+	if (sock_.valid()) {
+		io_.stop();
+		sock_.close();
+	}
+}
 
 void manual_connection::attach(ev::dynamic_loop &loop) noexcept {
 	assertrx(!attached_);
@@ -33,9 +40,7 @@ void manual_connection::close_conn(int err) {
 	connect_timer_.stop();
 	if (sock_.valid()) {
 		io_.stop();
-		if rx_unlikely (sock_.close() != 0) {
-			perror("sock_.close() error");
-		}
+		sock_.close();
 	}
 	cur_events_ = 0;
 	const bool hadRData = !r_data_.empty();
@@ -54,20 +59,20 @@ void manual_connection::close_conn(int err) {
 	if (stats_) stats_->stop();
 }
 
-void manual_connection::restart(socket &&s) {
+void manual_connection::restart(int fd) {
 	assertrx(!sock_.valid());
-	sock_ = std::move(s);
+	sock_ = fd;
 	if (stats_) stats_->restart();
 }
 
-int manual_connection::async_connect(std::string_view addr, socket_domain type) noexcept {
+int manual_connection::async_connect(std::string_view addr) noexcept {
 	connect_timer_.stop();
 	if (state_ == conn_state::connected || state_ == conn_state::connecting) {
 		close_conn(k_sock_closed_err);
 	}
 	assertrx(w_data_.empty());
 	++conn_id_;
-	int ret = sock_.connect(addr, type);
+	int ret = sock_.connect(addr);
 	if (ret == 0) {
 		state_ = conn_state::connected;
 		return 0;

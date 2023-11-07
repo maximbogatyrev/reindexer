@@ -1,5 +1,6 @@
 #include "dslparser.h"
 #include "core/cjson/jschemachecker.h"
+#include "core/cjson/jsonbuilder.h"
 #include "core/query/query.h"
 #include "estl/fast_hash_map.h"
 #include "gason/gason.h"
@@ -323,6 +324,34 @@ static void parseFilter(const JsonValue& filter, Query& q, std::vector<std::pair
 
 	switch (entryType) {
 		case ENTRY:
+			switch (condition) {
+				case CondGe:
+				case CondGt:
+				case CondLt:
+				case CondLe:
+				case CondLike:
+					if (values.size() != 1) {
+						throw Error(errLogic, "Condition %d must have exact 1 value, but %d values was provided", condition, values.size());
+					}
+					break;
+				case CondRange:
+					if (values.size() != 2) {
+						throw Error(errLogic, "Condition RANGE must have exact 2 values, but %d values was provided", values.size());
+					}
+					break;
+				case CondEq:
+				case CondSet:
+				case CondAllSet:
+					break;
+				case CondAny:
+					if (values.size() != 0) {
+						throw Error(errLogic, "Condition ANY must have 0 values, but %d values was provided", values.size());
+					}
+					break;
+				case CondEmpty:
+				case CondDWithin:
+					break;
+			}
 			q.entries.Append(op, QueryEntry{std::move(fields[0]), condition, std::move(values)});
 			break;
 		case BRACKET:
@@ -350,32 +379,30 @@ static void parseJoinedEntries(const JsonValue& joinEntries, JoinedQuery& qjoin)
 		auto& joinEntry = element.value;
 		checkJsonValueType(joinEntry, "Joined", JSON_OBJECT);
 
-		OpType op{OpAnd};
-		CondType cond{};
-		std::string leftField, rightField;
+		QueryJoinEntry qjoinEntry;
 		for (const auto& subelement : joinEntry) {
 			auto& value = subelement.value;
 			std::string_view name = subelement.key;
 			switch (get<JoinEntry>(joined_entry_map, name, "join_query.on"sv)) {
 				case JoinEntry::LeftField:
 					checkJsonValueType(value, name, JSON_STRING);
-					leftField = std::string(value.toString());
+					qjoinEntry.index_ = std::string(value.toString());
 					break;
 				case JoinEntry::RightField:
 					checkJsonValueType(value, name, JSON_STRING);
-					rightField = std::string(value.toString());
+					qjoinEntry.joinIndex_ = std::string(value.toString());
 					break;
 				case JoinEntry::Cond:
 					checkJsonValueType(value, name, JSON_STRING);
-					cond = get<CondType>(cond_map, value.toString(), "condition enum"sv);
+					qjoinEntry.condition_ = get<CondType>(cond_map, value.toString(), "condition enum"sv);
 					break;
 				case JoinEntry::Op:
 					checkJsonValueType(value, name, JSON_STRING);
-					op = get<OpType>(op_map, value.toString(), "operation enum"sv);
+					qjoinEntry.op_ = get<OpType>(op_map, value.toString(), "operation enum"sv);
 					break;
 			}
 		}
-		qjoin.joinEntries_.emplace_back(op, cond, std::move(leftField), std::move(rightField));
+		qjoin.joinEntries_.emplace_back(qjoinEntry);
 	}
 }
 
@@ -392,7 +419,7 @@ void parseSingleJoinQuery(const JsonValue& join, Query& query) {
 				break;
 			case JoinRoot::Namespace:
 				checkJsonValueType(value, name, JSON_STRING);
-				qjoin.SetNsName(value.toString());
+				qjoin._namespace = std::string(value.toString());
 				break;
 			case JoinRoot::Filters:
 				checkJsonValueType(value, name, JSON_ARRAY);
@@ -403,11 +430,11 @@ void parseSingleJoinQuery(const JsonValue& join, Query& query) {
 				break;
 			case JoinRoot::Limit:
 				checkJsonValueType(value, name, JSON_NUMBER, JSON_DOUBLE);
-				qjoin.Limit(static_cast<unsigned>(value.toNumber()));
+				qjoin.count = static_cast<unsigned>(value.toNumber());
 				break;
 			case JoinRoot::Offset:
 				checkJsonValueType(value, name, JSON_NUMBER, JSON_DOUBLE);
-				qjoin.Offset(static_cast<unsigned>(value.toNumber()));
+				qjoin.start = static_cast<unsigned>(value.toNumber());
 				break;
 			case JoinRoot::On:
 				parseJoinedEntries(value, qjoin);
@@ -577,17 +604,17 @@ void parse(const JsonValue& root, Query& q) {
 		switch (get<Root>(root_map, name, "root"sv)) {
 			case Root::Namespace:
 				checkJsonValueType(v, name, JSON_STRING);
-				q.SetNsName(v.toString());
+				q._namespace = std::string(v.toString());
 				break;
 
 			case Root::Limit:
 				checkJsonValueType(v, name, JSON_NUMBER, JSON_DOUBLE);
-				q.Limit(static_cast<unsigned>(v.toNumber()));
+				q.count = static_cast<unsigned>(v.toNumber());
 				break;
 
 			case Root::Offset:
 				checkJsonValueType(v, name, JSON_NUMBER, JSON_DOUBLE);
-				q.Offset(static_cast<unsigned>(v.toNumber()));
+				q.start = static_cast<unsigned>(v.toNumber());
 				break;
 
 			case Root::Filters:
@@ -616,7 +643,7 @@ void parse(const JsonValue& root, Query& q) {
 				break;
 			case Root::ReqTotal:
 				checkJsonValueType(v, name, JSON_STRING);
-				q.CalcTotal(get<CalcTotalMode>(reqtotal_values, v.toString(), "req_total enum"sv));
+				q.calcTotal = get<CalcTotalMode>(reqtotal_values, v.toString(), "req_total enum"sv);
 				break;
 			case Root::Aggregations:
 				checkJsonValueType(v, name, JSON_ARRAY);

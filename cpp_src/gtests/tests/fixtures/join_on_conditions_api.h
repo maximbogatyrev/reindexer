@@ -23,8 +23,7 @@ public:
 			builder.End();
 			err = item.FromJSON(ser.c_str());
 			ASSERT_TRUE(err.ok()) << err.what();
-			err = rt.reindexer->Insert(leftNs, item);
-			ASSERT_TRUE(err.ok()) << err.what();
+			rt.reindexer->Insert(leftNs, item);
 		}
 
 		for (unsigned int i = 0; i < rightNsData.size(); i++) {
@@ -41,8 +40,7 @@ public:
 			builder.End();
 			err = item.FromJSON(ser.c_str());
 			ASSERT_TRUE(err.ok()) << err.what();
-			err = rt.reindexer->Insert(rightNs, item);
-			ASSERT_TRUE(err.ok()) << err.what();
+			rt.reindexer->Insert(rightNs, item);
 		}
 	}
 
