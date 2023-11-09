@@ -52,8 +52,30 @@ public:
 	void CheckResults(const std::string& query, const reindexer::QueryResults& qr, std::vector<ResType>& expectedResults, bool withOrder) {
 		constexpr bool kTreeFields = std::tuple_size<ResType>{} == 3;
 		EXPECT_EQ(qr.Count(), expectedResults.size()) << "Query: " << query;
+
+		reindexer::fast_hash_map<int, int> itemRanks;
 		for (auto itRes : qr) {
 			const auto item = itRes.GetItem(false);
+
+			if (withOrder) {
+				auto rank = itRes.GetItemRef().Proc();
+				[[maybe_unused]] auto errMessage = [rank, &qr, &itemRanks](const reindexer::Item& item) {
+					auto itemInfo = [](const reindexer::Item& i) {
+						const std::string itemInfo2 = "ft1 = %s; ft2 = %s;\n";
+						const std::string itemInfo3 = "ft1 = %s; ft2 = %s; ft3 = %s\n";
+						return kTreeFields ? fmt::sprintf(itemInfo3, i["ft1"].As<std::string>(), i["ft2"].As<std::string>(),
+														  i["ft3"].As<std::string>())
+										   : fmt::sprintf(itemInfo2, i["ft1"].As<std::string>(), i["ft2"].As<std::string>());
+					};
+
+					return fmt::sprintf("Different items have same rank; Rank = %d;\nItem1:\n%s\nItem2:\n%s\n", rank, itemInfo(item),
+										itemInfo(qr[itemRanks.at(rank)].GetItem(false)));
+				};
+
+				// ASSERT_EQ(itemRanks.count(rank), 0) << errMessage(item);
+				itemRanks[rank] = itRes.idx_;
+			}
+
 			const auto it = std::find_if(expectedResults.begin(), expectedResults.end(), [&item](const ResType& p) {
 				if constexpr (kTreeFields) {
 					return std::get<0>(p) == item["ft1"].As<std::string>() && std::get<1>(p) == item["ft2"].As<std::string>() &&
@@ -72,10 +94,20 @@ public:
 			} else {
 				if (withOrder) {
 					if constexpr (kTreeFields) {
+						if (it != expectedResults.begin()) {
+							std::cout << "Expected Results:" << std::endl;
+							for (const auto& p : expectedResults) {
+								std::cout << std::get<0>(p) << "  |  " << std::get<1>(p) << "  |  " << std::get<2>(p) << std::endl;
+							}
+						}
+
 						EXPECT_EQ(it, expectedResults.begin())
 							<< "Found not in order: \"" << item["ft1"].As<std::string>() << "\" \"" << item["ft2"].As<std::string>()
 							<< "\" \"" << item["ft3"].As<std::string>() << "\"\nQuery: " << query;
 					} else {
+						auto rank = itRes.GetItemRef().Proc();
+						std::cout << fmt::sprintf("Rank = %d; item[ft1] = %s; item[ft2] = %s\n", rank, item["ft1"].As<std::string>(),
+												  item["ft2"].As<std::string>());
 						EXPECT_EQ(it, expectedResults.begin()) << "Found not in order: \"" << item["ft1"].As<std::string>() << "\" \""
 															   << item["ft2"].As<std::string>() << "\"\nQuery: " << query;
 					}

@@ -1246,8 +1246,27 @@ typename IDataHolder::MergeData Selecter<IdCont>::mergeResults(std::vector<TextS
 	std::vector<IDataHolder::MergedOffsetT> idoffsets;
 
 	for (auto& rawRes : rawResults) {
+		std::cout << std::endl;
+		std::cout << "Raw Before Sort" << std::endl;
+		for (auto& r : rawRes) {
+			std::cout << fmt::sprintf("Pattern: %s; Proc: %d; Vids: ", r.pattern, r.proc_);
+			for (const auto& id : *r.vids_) {
+				std::cout << id.Id() << ", ";
+			}
+			std::cout << std::endl;
+		}
+		std::cout << std::endl;
 		boost::sort::pdqsort(rawRes.begin(), rawRes.end(),
 							 [](const TextSearchResult& lhs, const TextSearchResult& rhs) { return lhs.proc_ > rhs.proc_; });
+		std::cout << "Raw After Sort" << std::endl;
+		for (auto& r : rawRes) {
+			std::cout << fmt::sprintf("Pattern: %s; Proc: %d; Vids: ", r.pattern, r.proc_);
+			for (const auto& id : *r.vids_) {
+				std::cout << id.Id() << ", ";
+			}
+			std::cout << std::endl;
+		}
+		std::cout << std::endl;
 	}
 
 	const auto maxMergedSize = std::min(size_t(holder_.cfg_->mergeLimit), totalORVids);
@@ -1332,8 +1351,20 @@ typename IDataHolder::MergeData Selecter<IdCont>::mergeResults(std::vector<TextS
 		}
 	}
 
+	std::cout << std::endl;
+	std::cout << "Merged Before Sort" << std::endl;
+	for (auto& m : merged) {
+		std::cout << fmt::sprintf(" Proc: %d; Id in raw vdoc: %d;", m.proc, m.id) << std::endl;
+	}
+
 	boost::sort::pdqsort(merged.begin(), merged.end(),
 						 [](const IDataHolder::MergeInfo& lhs, const IDataHolder::MergeInfo& rhs) { return lhs.proc > rhs.proc; });
+
+	std::cout << std::endl;
+	std::cout << "Merged After Sort" << std::endl;
+	for (auto& m : merged) {
+		std::cout << fmt::sprintf(" Proc: %d; Id in raw vdoc: %d;", m.proc, m.id) << std::endl;
+	}
 	return merged;
 }
 
