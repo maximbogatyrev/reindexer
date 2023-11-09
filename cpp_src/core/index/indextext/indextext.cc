@@ -151,6 +151,13 @@ SelectKeyResults IndexText<T>::doSelectKey(const VariantArray &keys, const std::
 	dsl.parse(keys[0].As<std::string>());
 
 	IdSet::Ptr mergedIds = Select(ftctx, std::move(dsl), inTransaction, std::move(mergeStatuses), useExternSt, rdxCtx);
+
+	std::cout << "MERGED IDS:" << std::endl;
+	for (auto id : *mergedIds) {
+		std::cout << id << ", ";
+	}
+	std::cout << std::endl;
+
 	SelectKeyResult res;
 	if (mergedIds) {
 		bool need_put = (useExternSt == FtUseExternStatuses::No) && ckey.has_value();
