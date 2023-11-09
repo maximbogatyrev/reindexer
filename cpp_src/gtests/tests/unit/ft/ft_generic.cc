@@ -973,15 +973,13 @@ TEST_P(FTGenericApi, ConfigFtProc) {
 	cfgDef.synonyms = {{{"тестов"}, {"задача"}}};
 	reindexer::FtFastConfig cfg = cfgDef;
 
-	cfg.rankingConfig.fullMatch = 100;
+	cfg.rankingConfig.fullMatch = 200;
 	cfg.rankingConfig.stemmerPenalty = 1;  // for idf/tf boost
-	cfg.rankingConfig.translit = 50;
-	cfg.rankingConfig.kblayout = 40;
-	cfg.rankingConfig.synonyms = 30;
+	cfg.rankingConfig.synonyms = 70;
+	cfg.rankingConfig.translit = 1;
 	Init(cfg);
 	Add("nm1"sv, "маленький тест"sv, "");
 	Add("nm1"sv, "один тестов очень очень тестов тестов тестов"sv, "");
-	Add("nm1"sv, "два тестов очень очень тестов тестов тестов"sv, "");
 	Add("nm1"sv, "testov"sv, "");
 	Add("nm1"sv, "ntcnjd"sv, "");
 	Add("nm1"sv, "задача"sv, "");
@@ -990,35 +988,42 @@ TEST_P(FTGenericApi, ConfigFtProc) {
 
 	reindexer::Error err;
 	CheckResults("тестов",
-				 {{"маленький !тест!", ""},
-				  {"один !тестов! очень очень !тестов тестов тестов!", ""},
-				  {"два !тестов! очень очень !тестов тестов тестов!", ""},
-				  {"!testov!", ""},
-				  {"!ntcnjd!", ""},
-				  {"!задача!", ""}},
+				 {
+					 {"один !тестов! очень очень !тестов тестов тестов!", ""},
+					 {"маленький !тест!", ""},
+					 {"!ntcnjd!", ""},
+					 {"!задача!", ""},
+					 {"!testov!", ""},
+				 },
 				 true);
 	cfg = cfgDef;
+	cfg.rankingConfig.fullMatch = 50;
+	cfg.rankingConfig.kblayout = 10;
 	err = SetFTConfig(cfg, "nm1", "ft3", {"ft1", "ft2"});
 	ASSERT_TRUE(err.ok()) << err.what();
 	CheckResults("тестов",
-				 {{"!задача!", ""},
-				  {"!testov!", ""},
-				  {"!ntcnjd!", ""},
-				  {"один !тестов! очень очень !тестов тестов тестов!", ""},
-				  {"два !тестов! очень очень !тестов тестов тестов!", ""},
-				  {"маленький !тест!", ""}},
+				 {
+					 {"!задача!", ""},
+					 {"!testov!", ""},
+					 {"!ntcnjd!", ""},
+					 {"один !тестов! очень очень !тестов тестов тестов!", ""},
+					 {"маленький !тест!", ""},
+				 },
 				 true);
 	cfg = cfgDef;
 	cfg.rankingConfig.stemmerPenalty = 500;
+	cfg.rankingConfig.translit = 70;
+	cfg.rankingConfig.kblayout = 10;
 	err = SetFTConfig(cfg, "nm1", "ft3", {"ft1", "ft2"});
 	ASSERT_TRUE(err.ok()) << err.what();
 	CheckResults("тестов",
-				 {{"!задача!", ""},
-				  {"!testov!", ""},
-				  {"!ntcnjd!", ""},
-				  {"один !тестов! очень очень !тестов тестов тестов!", ""},
-				  {"два !тестов! очень очень !тестов тестов тестов!", ""},
-				  {"маленький !тест!", ""}},
+				 {
+					 {"!задача!", ""},
+					 {"один !тестов! очень очень !тестов тестов тестов!", ""},
+					 {"!testov!", ""},
+					 {"!ntcnjd!", ""},
+					 {"маленький !тест!", ""},
+				 },
 				 true);
 
 	cfg = cfgDef;
@@ -1029,15 +1034,18 @@ TEST_P(FTGenericApi, ConfigFtProc) {
 
 	cfg = cfgDef;
 	cfg.rankingConfig.synonyms = 500;
+	cfg.rankingConfig.translit = 70;
+	cfg.rankingConfig.kblayout = 10;
 	err = SetFTConfig(cfg, "nm1", "ft3", {"ft1", "ft2"});
 	ASSERT_TRUE(err.ok()) << err.what();
 	CheckResults("тестов",
-				 {{"!задача!", ""},
-				  {"!testov!", ""},
-				  {"!ntcnjd!", ""},
-				  {"один !тестов! очень очень !тестов тестов тестов!", ""},
-				  {"два !тестов! очень очень !тестов тестов тестов!", ""},
-				  {"маленький !тест!", ""}},
+				 {
+					 {"!задача!", ""},
+					 {"один !тестов! очень очень !тестов тестов тестов!", ""},
+					 {"маленький !тест!", ""},
+					 {"!testov!", ""},
+					 {"!ntcnjd!", ""},
+				 },
 				 true);
 	cfg = cfgDef;
 	cfg.rankingConfig.synonyms = 501;
@@ -1047,67 +1055,75 @@ TEST_P(FTGenericApi, ConfigFtProc) {
 
 	cfg = cfgDef;
 	cfg.rankingConfig.translit = 200;
+	cfg.rankingConfig.kblayout = 10;
 	err = SetFTConfig(cfg, "nm1", "ft3", {"ft1", "ft2"});
 	ASSERT_TRUE(err.ok()) << err.what();
 	CheckResults("тестов",
-				 {{"!testov!", ""},
-				  {"!задача!", ""},
-				  {"!ntcnjd!", ""},
-				  {"один !тестов! очень очень !тестов тестов тестов!", ""},
-				  {"два !тестов! очень очень !тестов тестов тестов!", ""},
-				  {"маленький !тест!", ""}},
+				 {
+					 {"!testov!", ""},
+					 {"!задача!", ""},
+					 {"один !тестов! очень очень !тестов тестов тестов!", ""},
+					 {"маленький !тест!", ""},
+					 {"!ntcnjd!", ""},
+				 },
 				 true);
 
 	cfg = cfgDef;
 	cfg.rankingConfig.typo = 300;
 	cfg.rankingConfig.translit = 200;
+	cfg.rankingConfig.kblayout = 10;
 	cfg.maxTypos = 4;
 	err = SetFTConfig(cfg, "nm1", "ft3", {"ft1", "ft2"});
 	ASSERT_TRUE(err.ok()) << err.what();
 	CheckResults("тестов~",
-				 {{"!Местов!", ""},
-				  {"!МестоД!", ""},
-				  {"!testov!", ""},
-				  {"!задача!", ""},
-				  {"!ntcnjd!", ""},
-				  {"один !тестов! очень очень !тестов тестов тестов!", ""},
-				  {"два !тестов! очень очень !тестов тестов тестов!", ""},
-				  {"маленький !тест!", ""}},
+				 {
+					 {"!Местов!", ""},
+					 {"!МестоД!", ""},
+					 {"!testov!", ""},
+					 {"!задача!", ""},
+					 {"один !тестов! очень очень !тестов тестов тестов!", ""},
+					 {"маленький !тест!", ""},
+					 {"!ntcnjd!", ""},
+				 },
 				 true);
 
 	cfg = cfgDef;
 	cfg.rankingConfig.typo = 300;
 	cfg.rankingConfig.typoPenalty = 150;
-	cfg.rankingConfig.translit = 200;
+	cfg.rankingConfig.translit = 150;
+	cfg.rankingConfig.kblayout = 10;
 	cfg.maxTypos = 4;
 	err = SetFTConfig(cfg, "nm1", "ft3", {"ft1", "ft2"});
 	ASSERT_TRUE(err.ok()) << err.what();
 	CheckResults("тестов~",
-				 {{"!Местов!", ""},
-				  {"!testov!", ""},
-				  {"!МестоД!", ""},
-				  {"!задача!", ""},
-				  {"!ntcnjd!", ""},
-				  {"один !тестов! очень очень !тестов тестов тестов!", ""},
-				  {"два !тестов! очень очень !тестов тестов тестов!", ""},
-				  {"маленький !тест!", ""}},
+				 {
+					 {"!Местов!", ""},
+					 {"!МестоД!", ""},
+					 {"!testov!", ""},
+					 {"!задача!", ""},
+					 {"один !тестов! очень очень !тестов тестов тестов!", ""},
+					 {"маленький !тест!", ""},
+					 {"!ntcnjd!", ""},
+				 },
 				 true);
 
 	cfg = cfgDef;
 	cfg.rankingConfig.typo = 300;
 	cfg.rankingConfig.typoPenalty = 500;
 	cfg.rankingConfig.translit = 200;
+	cfg.rankingConfig.kblayout = 10;
 	cfg.maxTypos = 4;
 	err = SetFTConfig(cfg, "nm1", "ft3", {"ft1", "ft2"});
 	ASSERT_TRUE(err.ok()) << err.what();
 	CheckResults("тестов~",
-				 {{"!testov!", ""},
-				  {"!Местов!", ""},
-				  {"!задача!", ""},
-				  {"!ntcnjd!", ""},
-				  {"один !тестов! очень очень !тестов тестов тестов!", ""},
-				  {"два !тестов! очень очень !тестов тестов тестов!", ""},
-				  {"маленький !тест!", ""}},
+				 {
+					 {"!testov!", ""},
+					 {"!Местов!", ""},
+					 {"!задача!", ""},
+					 {"один !тестов! очень очень !тестов тестов тестов!", ""},
+					 {"маленький !тест!", ""},
+					 {"!ntcnjd!", ""},
+				 },
 				 true);
 }
 
