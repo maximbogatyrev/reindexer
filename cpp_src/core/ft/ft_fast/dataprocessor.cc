@@ -137,6 +137,7 @@ size_t DataProcessor<IdCont>::buildWordsMap(words_map &words_um) {
 	} else if (maxIndexWorkers > 8) {
 		maxIndexWorkers = 8;
 	}
+	maxIndexWorkers = 1;
 	size_t szCnt = 0;
 	struct context {
 		words_map words_um;
