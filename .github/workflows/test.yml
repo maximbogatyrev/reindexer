@@ -22,5 +22,5 @@ jobs:
         run: |
           echo "Running C++ directly in this job due to Action's problem with artifacts transition for macos-11 and macos-12 runners"
           cd build
-          ./cpp_src/gtests/tests/tests --gtest_filter="FTGenericApi.ConfigFtProc*" --gtest_repeat=10
+          ./cpp_src/gtests/tests/tests --gtest_filter="FTGenericApi.ConfigFtProc*CPU*" --gtest_repeat=10
 

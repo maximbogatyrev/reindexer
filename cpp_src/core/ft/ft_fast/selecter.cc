@@ -115,6 +115,8 @@ RX_NO_INLINE IDataHolder::MergeData Selecter<IdCont>::Process(FtDSLQuery&& dsl, 
 	std::vector<SynonymsDsl> synonymsDsl;
 	holder_.synonyms_->PreProcess(dsl, synonymsDsl, holder_.cfg_->rankingConfig.synonyms);
 	if (!inTransaction) ThrowOnCancel(rdxCtx);
+	std::cout << std::endl << "------------VariantsProcess------------" << std::endl;
+
 	for (size_t i = 0; i < dsl.size(); ++i) {
 		const auto irrVariantsCount = ctx.lowRelVariants.size();
 
@@ -163,6 +165,7 @@ RX_NO_INLINE IDataHolder::MergeData Selecter<IdCont>::Process(FtDSLQuery&& dsl, 
 		}
 
 		processVariants<useExternSt>(ctx, mergeStatuses);
+		std::cout << std::endl << std::endl << "---------------------------------------------" << std::endl << std::endl;
 		if (res.term.opts.typos) {
 			// Lookup typos from typos_ map and fill results
 			TyposHandler h(*holder_.cfg_);
@@ -225,13 +228,25 @@ void Selecter<IdCont>::processStepVariants(FtSelectContext& ctx, typename DataHo
 	}
 	auto& tmpstr = variant.pattern;
 	auto& suffixes = step.suffixes_;
+	// std::cout << "=====Suffixes=======" << std::endl;
+	// for (auto it = suffixes.begin(); it != suffixes.end(); ++it) {
+	// 	std::cout << fmt::sprintf("char: %s; id = %d", it->first, it->second.b.id) << std::endl;
+	// }
+	// std::cout << std::endl;
 	//  Lookup current variant in suffixes array
 	auto keyIt = suffixes.lower_bound(tmpstr);
+
+	if (keyIt != suffixes.end()) {
+		std::cout << fmt::sprintf("LOWERBOUND: char: %s; id = %d", keyIt->first, keyIt->second.b.id) << std::endl;
+	}
+	// std::cout << "====================:" << std::endl << std::endl;
 
 	int matched = 0, skipped = 0, vids = 0, excludedCnt = 0;
 	bool withPrefixes = variant.opts.pref;
 	bool withSuffixes = variant.opts.suff;
 	const auto initialLimit = vidsLimit;
+
+	std::cout << "=====CYCLE=======" << std::endl;
 
 	// Walk current variant in suffixes array and fill results
 	do {
@@ -246,6 +261,13 @@ void Selecter<IdCont>::processStepVariants(FtSelectContext& ctx, typename DataHo
 
 		const WordIdType glbwordId = keyIt->second;
 		const auto& hword = holder_.getWordById(glbwordId);
+		std::cout << fmt::sprintf("glbwordId: step_num = %d, id = %d, multi_flag = %d.\nVDOC_IDS:", glbwordId.b.step_num, glbwordId.b.id,
+								  glbwordId.b.multi_flag)
+				  << std::endl;
+		for (const auto& v : hword.vids_) {
+			std::cout << v.Id() << ", ";
+		}
+		std::cout << std::endl;
 
 		if constexpr (useExternSt == FtUseExternStatuses::Yes) {
 			bool excluded = true;
@@ -278,6 +300,7 @@ void Selecter<IdCont>::processStepVariants(FtSelectContext& ctx, typename DataHo
 
 		const auto it = res.foundWords->find(glbwordId);
 		if (it == res.foundWords->end() || it->second.first != curRawResultIdx) {
+			std::cout << fmt::sprintf("KeyIt: char: %s; id = %d", keyIt->first, keyIt->second.b.id) << std::endl;
 			res.push_back({&hword.vids_, keyIt->first, proc, suffixes.virtual_word_len(suffixWordId)});
 			const auto vidsSize = hword.vids_.size();
 			res.idsCnt_ += vidsSize;
@@ -297,6 +320,7 @@ void Selecter<IdCont>::processStepVariants(FtSelectContext& ctx, typename DataHo
 			++skipped;
 		}
 	} while ((keyIt++).lcp() >= int(tmpstr.length()));
+	std::cout << "===============" << std::endl << std::endl;
 	if rx_unlikely (holder_.cfg_->logLevel >= LogInfo) {
 		std::string limitString;
 		if (vidsLimit <= vids) {
