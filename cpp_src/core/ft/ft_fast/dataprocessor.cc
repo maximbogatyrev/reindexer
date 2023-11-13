@@ -108,6 +108,8 @@ std::vector<WordIdType> DataProcessor<IdCont>::BuildSuffix(words_map &words_um, 
 
 	found.reserve(words_um.size());
 
+	std::ostringstream ss;
+	ss << std::endl << "===========SUFFIXES by words_um=============" << std::endl;
 	for (auto &keyIt : words_um) {
 		// if we still haven't whis word we add it to new suffix tree else we will only add info to current word
 
@@ -120,12 +122,17 @@ std::vector<WordIdType> DataProcessor<IdCont>::BuildSuffix(words_map &words_um, 
 
 		words.emplace_back();
 		pos = holder_.BuildWordId(id);
+
+		ss << fmt::sprintf("\tword = %s; id = %d\n", keyIt.first, found.back().b.id);
 		if (holder_.cfg_->enableNumbersSearch && keyIt.second.virtualWord) {
 			suffix.insert(keyIt.first, pos, kDigitUtfSizeof);
 		} else {
 			suffix.insert(keyIt.first, pos);
 		}
 	}
+	ss << std::endl << "===========END SUFFIXES=============" << std::endl;
+	std::cout << ss.str();
+
 	return found;
 }
 
@@ -137,7 +144,9 @@ size_t DataProcessor<IdCont>::buildWordsMap(words_map &words_um) {
 	} else if (maxIndexWorkers > 8) {
 		maxIndexWorkers = 8;
 	}
-	maxIndexWorkers = 1;
+	// maxIndexWorkers = 1;
+	std::cout << std::endl << "===========building words map=============" << std::endl;
+
 	size_t szCnt = 0;
 	struct context {
 		words_map words_um;
@@ -156,6 +165,8 @@ size_t DataProcessor<IdCont>::buildWordsMap(words_map &words_um) {
 		std::string word, str;
 		std::vector<const char *> wrds;
 		std::vector<std::string> virtualWords;
+		std::ostringstream ss;
+		ss << std::endl << std::endl << "in thread; i = " << i << std::endl;
 		for (VDocIdType j = i, sz = VDocIdType(vdocsTexts.size()); j < sz; j += maxIndexWorkers) {
 			const size_t vdocId = offset + j;
 			auto &vdoc = vdocs[vdocId];
@@ -163,12 +174,19 @@ size_t DataProcessor<IdCont>::buildWordsMap(words_map &words_um) {
 			vdoc.mostFreqWordCount.insert(vdoc.mostFreqWordCount.begin(), fieldscount, 0.0);
 
 			auto &vdocsText = vdocsTexts[j];
+			ss << "\tvdocsText; j = " << j << std::endl;
+			for (auto &v : vdocsText) {
+				ss << fmt::sprintf("\t\twords = %s; id = %d\n", v.first, v.second);
+			}
+
 			for (size_t field = 0, sz = vdocsText.size(); field < sz; ++field) {
 				split(vdocsText[field].first, str, wrds, cfg->extraWordSymbols);
 				const int rfield = vdocsText[field].second;
 				assertrx(rfield < fieldscount);
 
 				vdoc.wordsCount[rfield] = wrds.size();
+
+				ss << "wrds after split" << std::endl;
 
 				int insertPos = -1;
 				for (auto w : wrds) {
@@ -178,6 +196,7 @@ size_t DataProcessor<IdCont>::buildWordsMap(words_map &words_um) {
 
 					auto [idxIt, emplaced] = ctx->words_um.try_emplace(word, WordEntry());
 					(void)emplaced;
+					ss << fmt::sprintf("\t\tword = %s; vdocId = %d; insertPos = %s\n", word, vdocId, insertPos);
 					const int mfcnt = idxIt->second.vids_.Add(vdocId, insertPos, rfield);
 					if (mfcnt > vdoc.mostFreqWordCount[rfield]) {
 						vdoc.mostFreqWordCount[rfield] = mfcnt;
@@ -189,6 +208,8 @@ size_t DataProcessor<IdCont>::buildWordsMap(words_map &words_um) {
 				}
 			}
 		}
+		ss << "end thread i = " << i << std::endl << std::endl;
+		std::cout << ss.str();
 	};
 
 	for (uint32_t t = 1; t < maxIndexWorkers; ++t) {
@@ -231,6 +252,8 @@ size_t DataProcessor<IdCont>::buildWordsMap(words_map &words_um) {
 			logPrintf(LogError, "Exeption in loop with thread.join()");
 		}
 	}
+
+	std::cout << std::endl << "===========end building words map=============" << std::endl;
 
 	// Calculate avg words count per document for bm25 calculation
 	if (vdocs.size()) {
